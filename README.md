@@ -1,1 +1,0 @@
-# Sqlite_From_Scratch
