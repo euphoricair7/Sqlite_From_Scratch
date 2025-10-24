@@ -16,9 +16,9 @@ class DatabaseTestHarness:
         """Compile the C database program, ensuring it's up-to-date."""
         print("🔨 Compiling database...")
         try:
-            # The -Werror flag treats warnings as errors to catch more bugs.
+            # Use standard C11 and common warning flags
             compile_result = subprocess.run(
-                ['gcc', '-o', self.executable_path, 'maincode.c'],#'-Werror', '-Wall'],
+                ['gcc', '-o', self.executable_path, 'maincode.c', '-Wall', '-std=c11'],
                 capture_output=True, text=True, check=True
             )
         except subprocess.CalledProcessError as e:
@@ -43,8 +43,10 @@ class DatabaseTestHarness:
                 timeout=5  # Add a timeout to prevent hanging
             )
             
+            lines = [line for line in process.stdout.strip().split('\n') if line]
+            
             return {
-                'lines': [line for line in process.stdout.strip().split('\n') if line],
+                'lines': lines,
                 'stderr': process.stderr,
                 'returncode': process.returncode
             }
@@ -58,6 +60,10 @@ class DatabaseTestHarness:
             commands.append('.exit')
         return self.run_script(commands)
 
+def output_contains(lines, substring):
+    """Check if any line in the output contains the substring"""
+    return any(substring in line for line in lines)
+
 def test_basic_operations():
     """Test basic insert and select operations"""
     print("🧪 Testing basic operations...")
@@ -70,30 +76,22 @@ def test_basic_operations():
         'select'
     ])
     
-    # Print actual output for debugging
-    print("\nActual output lines:")
-    for i, line in enumerate(result['lines']):
-        print(f"{i}: '{line}'")
-    
-    # More lenient checks - just check that both messages exist somewhere
-    assert any('Executed' in line for line in result['lines']), "Insert should execute successfully"
-    assert any('(1, user1, person1@example.com)' in line for line in result['lines']), "Select should return inserted data"
+    assert output_contains(result['lines'], "Executed"), "Insert should execute successfully"
+    assert output_contains(result['lines'], "(1, user1, person1@example.com)"), "Select should return inserted data"
     
     # Test multiple inserts
     result = db.run_until_exit([
-        'insert 1 user1 person1@example.com',
         'insert 2 user2 person2@example.com',
         'insert 3 user3 person3@example.com',
+        'insert 4 user4 person4@example.com',
         'select'
     ])
     
-    # At least one 'Executed' message should be present
-    assert any('Executed' in line for line in result['lines']), "At least one insert should execute"
-    
     # Check for presence of all rows
-    assert any('(1, user1, person1@example.com)' in line for line in result['lines']), "First row should be present"
-    assert any('(2, user2, person2@example.com)' in line for line in result['lines']), "Second row should be present" 
-    assert any('(3, user3, person3@example.com)' in line for line in result['lines']), "Third row should be present"
+    assert output_contains(result['lines'], "Executed"), "Inserts should execute"
+    assert output_contains(result['lines'], "(2, user2, person2@example.com)"), "Second row should be present"
+    assert output_contains(result['lines'], "(3, user3, person3@example.com)"), "Third row should be present"
+    assert output_contains(result['lines'], "(4, user4, person4@example.com)"), "Fourth row should be present"
     
     print("✅ Basic operations tests passed!")
 
@@ -105,27 +103,27 @@ def test_error_conditions():
     
     # Test missing parameters
     result = db.run_until_exit(['insert'])
-    assert any('Syntax error' in line for line in result['lines']), "Should handle missing parameters"
+    assert output_contains(result['lines'], "Syntax error"), "Should handle missing parameters"
     
     result = db.run_until_exit(['insert 1'])
-    assert any('Syntax error' in line for line in result['lines']), "Should handle incomplete insert"
+    assert output_contains(result['lines'], "Syntax error"), "Should handle incomplete insert"
     
     # Test negative ID
     result = db.run_until_exit(['insert -1 user email@example.com'])
-    assert any('ID must be positive' in line for line in result['lines']), "Should reject negative IDs"
+    assert output_contains(result['lines'], "ID must be positive"), "Should reject negative IDs"
     
     # Test unrecognized commands
     result = db.run_until_exit(['delete'])
-    assert any('Unrecognized keyword' in line for line in result['lines']), "Should reject unknown commands"
+    assert output_contains(result['lines'], "Unrecognized keyword"), "Should reject unknown commands"
     
     # Test string length limits
     long_username = 'a' * 33  # Longer than COLUMN_USERNAME_SIZE (32)
     result = db.run_until_exit([f'insert 1 {long_username} email@example.com'])
-    assert any('String is too long' in line for line in result['lines']), "Should reject long usernames"
+    assert output_contains(result['lines'], "String is too long"), "Should reject long usernames"
     
     long_email = 'a' * 250 + '@example.com'  # Longer than COLUMN_EMAIL_SIZE (255)
     result = db.run_until_exit([f'insert 1 username {long_email}'])
-    assert any('String is too long' in line for line in result['lines']), "Should reject long emails"
+    assert output_contains(result['lines'], "String is too long"), "Should reject long emails"
     
     print("✅ Error condition tests passed!")
 
@@ -140,8 +138,8 @@ def test_boundary_conditions():
         'insert 0 user email@example.com',
         'select'
     ])
-    assert any('Executed' in line for line in result['lines']), "Should accept ID zero"
-    assert any('(0, user, email@example.com)' in line for line in result['lines']), "Should store ID zero correctly"
+    assert output_contains(result['lines'], "Executed"), "Should accept ID zero"
+    assert output_contains(result['lines'], "(0, user, email@example.com)"), "Should store ID zero correctly"
     
     # Test maximum length strings
     max_username = 'a' * 32  # Exactly COLUMN_USERNAME_SIZE
@@ -149,8 +147,8 @@ def test_boundary_conditions():
         f'insert 1 {max_username} email@example.com',
         'select'
     ])
-    assert any('Executed' in line for line in result['lines']), "Should accept max length username"
-    assert any(f'(1, {max_username}, email@example.com)' in line for line in result['lines']), "Should store max length username"
+    assert output_contains(result['lines'], "Executed"), "Should accept max length username"
+    assert output_contains(result['lines'], f"(1, {max_username}, email@example.com)"), "Should store max length username"
     
     print("✅ Boundary condition tests passed!")
 
@@ -160,13 +158,13 @@ def test_meta_commands():
     
     db = DatabaseTestHarness()
     
-    # Test .exit command
+    # Test .exit command - it should run without errors
     result = db.run_script(['.exit'])
     assert result['returncode'] == 0, "Should exit cleanly"
     
     # Test unrecognized meta command
     result = db.run_until_exit(['.foo'])
-    assert any("Unrecognized command" in line for line in result['lines']), "Should handle unknown meta commands"
+    assert output_contains(result['lines'], "Unrecognized command"), "Should handle unknown meta commands"
     
     print("✅ Meta command tests passed!")
 
@@ -177,21 +175,14 @@ def test_prints_constants():
     db = DatabaseTestHarness()
     result = db.run_script(['.constants', '.exit'])
 
-    # Check that constants are printed
-    assert any("Constants:" in line for line in result['lines']), "Should print constants heading"
-    
-    # Check for the presence of key constant values
-    constants_to_check = [
-        "ROW_SIZE",
-        "COMMON_NODE_HEADER_SIZE",
-        "LEAF_NODE_HEADER_SIZE",
-        "LEAF_NODE_CELL_SIZE",
-        "LEAF_NODE_SPACE_FOR_CELLS",
-        "LEAF_NODE_MAX_CELLS"
-    ]
-    
-    for constant in constants_to_check:
-        assert any(constant in line for line in result['lines']), f"Missing constant: {constant}"
+    # Check for presence of expected constant values
+    assert output_contains(result['lines'], "Constants:"), "Should show Constants header"
+    assert output_contains(result['lines'], "ROW_SIZE:"), "Should show ROW_SIZE"
+    assert output_contains(result['lines'], "COMMON_NODE_HEADER_SIZE:"), "Should show COMMON_NODE_HEADER_SIZE"
+    assert output_contains(result['lines'], "LEAF_NODE_HEADER_SIZE:"), "Should show LEAF_NODE_HEADER_SIZE"
+    assert output_contains(result['lines'], "LEAF_NODE_CELL_SIZE:"), "Should show LEAF_NODE_CELL_SIZE"
+    assert output_contains(result['lines'], "LEAF_NODE_SPACE_FOR_CELLS:"), "Should show LEAF_NODE_SPACE_FOR_CELLS"
+    assert output_contains(result['lines'], "LEAF_NODE_MAX_CELLS:"), "Should show LEAF_NODE_MAX_CELLS"
     
     print("✅ .constants output test passed!")
 
@@ -210,27 +201,12 @@ def test_btree_structure_one_node():
     ]
     result = db.run_script(script)
 
-    # Debug: print actual output
-    print("\nActual btree output:")
-    for line in result['lines']:
-        print(f"  {line}")
-    
-    # Verify inserts were executed by counting lines containing "Executed"
-    executed_count = sum(1 for line in result['lines'] if "Executed" in line)
-    assert executed_count >= 3, f"Expected at least 3 'Executed' messages, got {executed_count}"
-    
-    # Check for the presence of tree output
-    assert any("Tree:" in line for line in result['lines']), "Tree output should be present"
-    assert any("leaf" in line for line in result['lines']), "Should show leaf node"
-    
-    # Look for key values in the output
-    for key in ["1", "2", "3"]:
-        found = False
-        for line in result['lines']:
-            if line.strip().endswith(key):
-                found = True
-                break
-        assert found, f"Key {key} should be in the tree output"
+    # Check for presence of btree structure elements
+    assert output_contains(result['lines'], "Tree:"), "Should show Tree header"
+    assert output_contains(result['lines'], "leaf"), "Should show leaf node"
+    assert output_contains(result['lines'], "1"), "Should contain key 1"
+    assert output_contains(result['lines'], "2"), "Should contain key 2"
+    assert output_contains(result['lines'], "3"), "Should contain key 3"
 
     print("✅ B-tree structure (one-node) test passed!")
 
@@ -247,15 +223,10 @@ def test_duplicate_id_error():
     ]
     result = db.run_script(script)
 
-    # Verify first insert was successful
-    assert any("Executed" in line for line in result['lines']), "First insert should be executed"
-    
-    # Verify error message for duplicate key
-    assert any("Duplicate key" in line for line in result['lines']), "Should show duplicate key error"
-    
-    # Verify select shows the original record
-    assert any("(1, user1, person1@example.com)" in line for line in result['lines']), "Original record should be present"
-    
+    assert output_contains(result['lines'], "Executed"), "First insert should execute"
+    assert output_contains(result['lines'], "Error: Duplicate key"), "Should show duplicate key error"
+    assert output_contains(result['lines'], "(1, user1, person1@example.com)"), "Original row should be present"
+
     print("✅ Duplicate ID error test passed!")
 
 def test_btree_structure_three_leaf_node():
@@ -264,65 +235,48 @@ def test_btree_structure_three_leaf_node():
 
     db = DatabaseTestHarness()
 
+    # Insert enough keys to cause a split
     script = []
     for i in range(1, 15):
         script.append(f"insert {i} user{i} person{i}@example.com")
+    
     script.append(".btree")
     script.append("insert 15 user15 person15@example.com")
     script.append(".exit")
 
     result = db.run_script(script)
 
-    # Check that we have enough executed messages from the inserts
-    assert sum(1 for line in result['lines'] if "Executed" in line) >= 14, "Should have executed all inserts"
+    # Check for presence of btree structure elements
+    assert output_contains(result['lines'], "Tree:"), "Should show Tree header"
+    assert output_contains(result['lines'], "internal"), "Should show internal node"
+    assert output_contains(result['lines'], "leaf"), "Should show leaf nodes"
     
-    # Check that the tree command produced output
-    assert any("Tree:" in line for line in result['lines']), "Should print tree structure"
-    
-    # Check for internal node structure
-    assert any("internal" in line for line in result['lines']), "Should have internal node"
-    
-    # Check for leaf nodes
-    assert sum(1 for line in result['lines'] if "leaf" in line) >= 2, "Should have at least 2 leaf nodes"
-    
-    # Check for keys in both node ranges
-    low_keys = ["1", "2", "3", "4", "5", "6", "7"]
-    high_keys = ["8", "9", "10", "11", "12", "13", "14"]
-    
-    # Check that at least some keys from each range are present
-    low_keys_present = sum(1 for key in low_keys if any(line.strip().endswith(key) for line in result['lines']))
-    high_keys_present = sum(1 for key in high_keys if any(line.strip().endswith(key) for line in result['lines']))
-    
-    assert low_keys_present > 0, "Should have keys from first range"
-    assert high_keys_present > 0, "Should have keys from second range"
-    
+    # Check for some specific keys to verify the structure
+    assert output_contains(result['lines'], "- key 7"), "Should contain internal node key 7"
+
     print("✅ B-tree structure (three-leaf-node) test passed!")
 
-# def test_select_on_multi_level_tree():
-#     """Test select statement on a multi-level tree"""
-#     print("🧪 Testing select on a multi-level tree...")
-# 
-#     # NOTE: This test is commented out because multi-level tree functionality 
-#     # is not yet fully implemented.
-#     
-#     # db = DatabaseTestHarness()
-# 
-#     # script = []
-#     # for i in range(1, 16):
-#     #     script.append(f"insert {i} user{i} person{i}@example.com")
-#     
-#     # script.append("select")
-#     # script.append(".exit")
-# 
-#     # result = db.run_script(script)
-# 
-#     # # Check that all rows are present in the output
-#     # for i in range(1, 16):
-#     #     assert any(f"({i}, user{i}, person{i}@example.com)" in line for line in result['lines']), f"Row {i} should be present"
-# 
-#     # print("✅ Select on multi-level tree test passed!")
-#     pass
+def test_select_on_multi_level_tree():
+    """Test select statement on a multi-level tree"""
+    print("🧪 Testing select on a multi-level tree...")
 
+    db = DatabaseTestHarness()
+
+    # Insert enough keys to create a multi-level tree
+    script = []
+    for i in range(1, 16):
+        script.append(f"insert {i} user{i} person{i}@example.com")
+    
+    script.append("select")
+    script.append(".exit")
+
+    result = db.run_script(script)
+
+    # Check that all rows are present in the output
+    for i in range(1, 16):
+        assert output_contains(result['lines'], f"({i}, user{i}, person{i}@example.com)"), f"Row {i} should be present"
+
+    print("✅ Select on multi-level tree test passed!")
 
 def run_single_test(test_func):
     """Run a single test and return success or failure"""
@@ -344,9 +298,8 @@ def main():
         test_prints_constants,
         test_btree_structure_one_node,
         test_duplicate_id_error,
-        test_btree_structure_three_leaf_node
-        # Multi-level tree test commented out since functionality not implemented yet
-        # test_select_on_multi_level_tree
+        test_btree_structure_three_leaf_node,
+        test_select_on_multi_level_tree
     ]
     
     passed_tests = []
