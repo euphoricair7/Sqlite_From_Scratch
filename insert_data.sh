@@ -37,6 +37,81 @@ if [ "$TEST_TYPE" = "simple" ]; then
     COMMANDS="${COMMANDS}insert $i user$i person$i@example.com\n"
   done
 
+elif [ "$TEST_TYPE" = "seven_leaf_btree" ]; then
+  echo "Running 7-leaf-node btree test (64 records)..."
+  # Insert records in specific order for 7-leaf-node btree structure
+  RECORDS=(
+    "58 user58 person58@example.com"
+    "56 user56 person56@example.com"
+    "8 user8 person8@example.com"
+    "54 user54 person54@example.com"
+    "77 user77 person77@example.com"
+    "7 user7 person7@example.com"
+    "25 user25 person25@example.com"
+    "71 user71 person71@example.com"
+    "13 user13 person13@example.com"
+    "22 user22 person22@example.com"
+    "53 user53 person53@example.com"
+    "51 user51 person51@example.com"
+    "59 user59 person59@example.com"
+    "32 user32 person32@example.com"
+    "36 user36 person36@example.com"
+    "79 user79 person79@example.com"
+    "10 user10 person10@example.com"
+    "33 user33 person33@example.com"
+    "20 user20 person20@example.com"
+    "4 user4 person4@example.com"
+    "35 user35 person35@example.com"
+    "76 user76 person76@example.com"
+    "49 user49 person49@example.com"
+    "24 user24 person24@example.com"
+    "70 user70 person70@example.com"
+    "48 user48 person48@example.com"
+    "39 user39 person39@example.com"
+    "15 user15 person15@example.com"
+    "47 user47 person47@example.com"
+    "30 user30 person30@example.com"
+    "86 user86 person86@example.com"
+    "31 user31 person31@example.com"
+    "68 user68 person68@example.com"
+    "37 user37 person37@example.com"
+    "66 user66 person66@example.com"
+    "63 user63 person63@example.com"
+    "40 user40 person40@example.com"
+    "78 user78 person78@example.com"
+    "19 user19 person19@example.com"
+    "46 user46 person46@example.com"
+    "14 user14 person14@example.com"
+    "81 user81 person81@example.com"
+    "72 user72 person72@example.com"
+    "6 user6 person6@example.com"
+    "50 user50 person50@example.com"
+    "85 user85 person85@example.com"
+    "67 user67 person67@example.com"
+    "2 user2 person2@example.com"
+    "55 user55 person55@example.com"
+    "69 user69 person69@example.com"
+    "5 user5 person5@example.com"
+    "65 user65 person65@example.com"
+    "52 user52 person52@example.com"
+    "1 user1 person1@example.com"
+    "29 user29 person29@example.com"
+    "9 user9 person9@example.com"
+    "43 user43 person43@example.com"
+    "75 user75 person75@example.com"
+    "21 user21 person21@example.com"
+    "82 user82 person82@example.com"
+    "12 user12 person12@example.com"
+    "18 user18 person18@example.com"
+    "60 user60 person60@example.com"
+    "44 user44 person44@example.com"
+  )
+  
+  for record in "${RECORDS[@]}"; do
+    COMMANDS="${COMMANDS}insert ${record}\n"
+  done
+  COMMANDS="${COMMANDS}.btree\n"
+
 elif [ "$TEST_TYPE" = "four_node_btree" ]; then
   echo "Running 4-leaf-node btree test (30 records)..."
   # Insert many values in a specific order for 4-leaf-node btree
@@ -78,14 +153,29 @@ COMMANDS="${COMMANDS}select\n"
 # Add exit to terminate the program
 COMMANDS="${COMMANDS}.exit\n"
 
-echo -e $COMMANDS | ./maincode $DB_FILE
-# Run the database program with the commands using a temp file so we can
-# capture the program exit status reliably (pipes can hide exit codes).
-TMP_IN=$(mktemp /tmp/sqlite_input.XXXXXX)
-printf "%b" "$COMMANDS" > "$TMP_IN"
-./maincode "$DB_FILE" < "$TMP_IN"
+# Create a temporary script with all commands
+TMP_SCRIPT=$(mktemp)
+printf "%b" "$COMMANDS" > "$TMP_SCRIPT"
+
+echo "Running all commands from temporary script..."
+./maincode "$DB_FILE" < "$TMP_SCRIPT"
 EXIT_CODE=$?
-rm -f "$TMP_IN"
+
+# Clean up
+rm -f "$TMP_SCRIPT"
+
+# Check if database has content
+if [ -f "$DB_FILE" ]; then
+    FILE_SIZE=$(stat -f%z "$DB_FILE" 2>/dev/null || stat -c%s "$DB_FILE")
+    echo "Database file size: $FILE_SIZE bytes"
+    if [ "$FILE_SIZE" -eq 0 ]; then
+        echo "Warning: Database file is empty!"
+        exit 1
+    fi
+else
+    echo "Error: Database file was not created!"
+    exit 1
+fi
 
 if [ $EXIT_CODE -ne 0 ]; then
   echo "Program exited with code $EXIT_CODE. Insertion may have failed."
