@@ -902,6 +902,43 @@ PrepareResult prepare_insert(InputBuffer* input_buffer, Statement* statement) {
   return PREPARE_SUCCESS;
 }
 
+PrepareResult prepare_update(InputBuffer* input_buffer, Statement* statement) {
+  statement->type = STATEMENT_UPDATE;
+
+  char* keyword = strtok(input_buffer->buffer, " ");
+  char* field = strtok(NULL, "=");
+  char* field_value = strtok(NULL, " ");
+  char* w_keyword = strtok(NULL, " ");
+  char* id_keyword = strktok(NULL, "=");
+  char* id_string = strtok(NULL, " ");
+  
+
+  if (id_string == NULL || field_value == NULL) {
+    return PREPARE_SYNTAX_ERROR;
+  }
+
+  int id = atoi(id_string);
+  if (id < 0) {
+    return PREPARE_NEGATIVE_ID;
+  }
+  if (strlen(field) > COLUMN_USERNAME_SIZE || strlen(field) >COLUMN_EMAIL_SIZE) {
+    return PREPARE_STRING_TOO_LONG;
+  }
+  
+  //if(id_string )
+  //add error chk if id doesnt exist in db
+  statement->row_to_update.id = id;
+  
+  if(field=="username"){
+    strcpy(statement->row_to_update.username, field_value);
+  }
+  
+  if(field=="email"){
+    strcpy(statement->row_to_update.email, field_value);
+  }
+  return PREPARE_SUCCESS;
+}
+
 PrepareResult prepare_statement(InputBuffer* input_buffer, Statement* statement) {
   if (strncmp(input_buffer->buffer, "insert", 6) == 0) {
     return prepare_insert(input_buffer, statement);
@@ -909,6 +946,12 @@ PrepareResult prepare_statement(InputBuffer* input_buffer, Statement* statement)
   if (strcmp(input_buffer->buffer, "select") == 0) {
     statement->type = STATEMENT_SELECT;
     return PREPARE_SUCCESS;
+  }
+  if(strncmp(input_buffer->buffer,"update",6)==0){
+    return prepare_update(input_buffer, statement);
+  }
+  if(strncmp(input_buffer->buffer,"delete",6)==0){
+    return prepare_delete(input_buffer, statement);
   }
 
   return PREPARE_UNRECOGNIZED_STATEMENT;
@@ -950,12 +993,38 @@ ExecuteResult execute_select(Statement* statement, Table* table) {
     return EXECUTE_SUCCESS;
 }
 
+ExecuteResult execute_update(Statement* statement, Table* table) {
+  
+
+  Row* row_to_update = &(statement->row_to_update);
+  uint32_t key_to_update = row_to_update->id;
+  //understand table_find and write this func
+  Cursor* cursor = find_existing_key(table, key_to_update);
+  
+  //if cursor= NULL doesnt work then just add the boolean function
+  if(cursor!=NULL){
+    leaf_node_update(cursor, row_to_update->id, row_to_update);
+  }
+  else{
+    printf("ID doesn't exist in database!!!\n");
+  }
+
+  free(cursor);
+
+  return EXECUTE_SUCCESS;
+}
+
 ExecuteResult execute_statement(Statement* statement, Table *table) {
   switch (statement->type) {
     case (STATEMENT_INSERT):
       return execute_insert(statement, table);
     case (STATEMENT_SELECT):
       return execute_select(statement, table);
+    case (STATEMENT_UPDATE):
+      return execute_update(statement,table);
+    case (STATEMENT_DELETE):
+      return NULL;
+      //execute_delete(statement, table);
   }
 }
 

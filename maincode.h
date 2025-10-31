@@ -34,7 +34,7 @@ typedef enum {
   PREPARE_UNRECOGNIZED_STATEMENT
 } PrepareResult;
 
-typedef enum { STATEMENT_INSERT, STATEMENT_SELECT } StatementType;
+typedef enum { STATEMENT_INSERT, STATEMENT_SELECT, STATEMENT_UPDATE, STATEMENT_DELETE } StatementType;
 
 typedef enum{
     META_COMMAND_SUCCESS,
@@ -71,6 +71,7 @@ typedef struct {
 typedef struct {
   StatementType type;
   Row row_to_insert; //only used by insert statement
+  Row row_to_update; //only used by update statement
 } Statement;
 
 typedef struct {
