@@ -467,6 +467,12 @@ Cursor* table_find(Table* table, uint32_t key) {
   }
 }
 
+Cursor* find_existing_key(Table* table, uint32_t key){
+  uint32_t root_page_num = table->root_page_num;
+  void* root_node = get_page(table->pager, root_page_num);
+
+  return internal_node_find(table, root_page_num, key);
+}
 uint32_t internal_node_find_child(void* node, uint32_t key) {
   /*
   Return the index of the child which should contain
@@ -628,6 +634,17 @@ void serialize_row(Row* source, void* destination) {
   memcpy(destination + ID_OFFSET, &(source->id), ID_SIZE);
   strncpy(destination + USERNAME_OFFSET, source->username, USERNAME_SIZE);
   strncpy(destination + EMAIL_OFFSET, source->email, EMAIL_SIZE);
+
+}
+
+void serialize_update_row(Row* source, void* destination, const char* field) {
+  if(strcmp(field,"username")){
+    strncpy(destination + USERNAME_OFFSET, source->username, USERNAME_SIZE);
+  }
+  if(strcmp(field,"email")){
+    strncpy(destination + EMAIL_OFFSET, source->email, EMAIL_SIZE);
+    //strcpy((destination+EMAIL_OFFSET),(source->email));
+  }
 
 }
 
@@ -813,7 +830,34 @@ void leaf_node_insert(Cursor* cursor, uint32_t key, Row* value){
 
 }
 
+void leaf_node_update(Cursor* cursor, uint32_t key, Row* value, const char* field){
+  //key is the reference for the row to be updated
+  //value is the new value to be set
+  printf("DEBUG: inside leaf_node_update function.\n");
+  void* node = get_page(cursor->table->pager, cursor->page_num);
+  uint32_t num_cells = *leaf_node_num_cells(node);
+  //debug statement
+  printf("Printing num_cells: %d\n", num_cells);
 
+  if(cursor-> cell_num >= num_cells){
+    printf("Error: Key %d not found for update\n", key);
+    return;
+  }
+
+  uint32_t key_print = *(leaf_node_key(node,cursor->cell_num));
+  printf("DEBUG:The KEy we are updating is: %d\n",key_print);
+
+  if(*(leaf_node_key(node, cursor->cell_num))!=key){
+        printf("%d Key doesn't exist at all in db.\n");
+      }
+
+  for (uint32_t i = num_cells; i > cursor->cell_num; i--) {
+      if(*(leaf_node_key(node, cursor->cell_num))==key){
+        serialize_update_row(value, leaf_node_value(node, cursor->cell_num), field);
+      }
+  }
+  
+}
 
 void free_table(Table* table) {
   for (int i = 0; table->pager->pages[i]; i++) {
@@ -909,9 +953,18 @@ PrepareResult prepare_update(InputBuffer* input_buffer, Statement* statement) {
   char* field = strtok(NULL, "=");
   char* field_value = strtok(NULL, " ");
   char* w_keyword = strtok(NULL, " ");
-  char* id_keyword = strktok(NULL, "=");
+  char* id_keyword = strtok(NULL, "=");
   char* id_string = strtok(NULL, " ");
+
+  strcpy(statement->field_to_be_updated, field);
   
+  printf("DEBUG: inside prepare_update function.\n");
+  printf("DEBUG: field: %s\n", field);
+  printf("DEBUG: field_value: %s\n", field_value);
+  printf("DEBUG: id_string: %s\n", id_string);
+  printf("DEBUG: w_keyword: %s\n", w_keyword);
+  printf("DEBUG: id_keyword: %s\n", id_keyword);
+  printf("DEBUG: id_string: %s\n", id_string);
 
   if (id_string == NULL || field_value == NULL) {
     return PREPARE_SYNTAX_ERROR;
@@ -929,12 +982,15 @@ PrepareResult prepare_update(InputBuffer* input_buffer, Statement* statement) {
   //add error chk if id doesnt exist in db
   statement->row_to_update.id = id;
   
-  if(field=="username"){
+  if(strcmp(field,"username")){
+    
     strcpy(statement->row_to_update.username, field_value);
+    printf("DEBUG: updated username to %s\n", statement->row_to_update.username);
   }
   
-  if(field=="email"){
+  if(strcmp(field,"email")){
     strcpy(statement->row_to_update.email, field_value);
+    printf("DEBUG: updated email to %s\n", statement->row_to_update.email);
   }
   return PREPARE_SUCCESS;
 }
@@ -950,9 +1006,9 @@ PrepareResult prepare_statement(InputBuffer* input_buffer, Statement* statement)
   if(strncmp(input_buffer->buffer,"update",6)==0){
     return prepare_update(input_buffer, statement);
   }
-  if(strncmp(input_buffer->buffer,"delete",6)==0){
-    return prepare_delete(input_buffer, statement);
-  }
+  // if(strncmp(input_buffer->buffer,"delete",6)==0){
+  //   return prepare_delete(input_buffer, statement);
+  // }
 
   return PREPARE_UNRECOGNIZED_STATEMENT;
 }
@@ -994,20 +1050,24 @@ ExecuteResult execute_select(Statement* statement, Table* table) {
 }
 
 ExecuteResult execute_update(Statement* statement, Table* table) {
-  
+  printf("DEBUG: inside execute_update function.\n");
 
   Row* row_to_update = &(statement->row_to_update);
   uint32_t key_to_update = row_to_update->id;
   //understand table_find and write this func
   Cursor* cursor = find_existing_key(table, key_to_update);
+
+  //debug statements
+  printf("printing row_to_update: %s %s %d", row_to_update->username,row_to_update->email,row_to_update->id);
   
+  char* field;
+  strcpy(field,statement->field_to_be_updated);
   //if cursor= NULL doesnt work then just add the boolean function
   if(cursor!=NULL){
-    leaf_node_update(cursor, row_to_update->id, row_to_update);
+    leaf_node_update(cursor, row_to_update->id, row_to_update, field);
   }
-  else{
-    printf("ID doesn't exist in database!!!\n");
-  }
+  
+  
 
   free(cursor);
 
@@ -1022,8 +1082,8 @@ ExecuteResult execute_statement(Statement* statement, Table *table) {
       return execute_select(statement, table);
     case (STATEMENT_UPDATE):
       return execute_update(statement,table);
-    case (STATEMENT_DELETE):
-      return NULL;
+    // case (STATEMENT_DELETE):
+    //   return NULL;
       //execute_delete(statement, table);
   }
 }

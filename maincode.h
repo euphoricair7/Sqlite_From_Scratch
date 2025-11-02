@@ -72,6 +72,7 @@ typedef struct {
   StatementType type;
   Row row_to_insert; //only used by insert statement
   Row row_to_update; //only used by update statement
+  char* field_to_be_updated;
 } Statement;
 
 typedef struct {
@@ -98,6 +99,9 @@ uint32_t* leaf_node_num_cells(void* node);
 void* leaf_node_cell(void* node, uint32_t cell_num);
 uint32_t* leaf_node_key(void* node, uint32_t cell_num);
 void* leaf_node_value(void* node, uint32_t cell_num);
+void leaf_node_update(Cursor* cursor, uint32_t key, Row* value, const char* field);
+Cursor* find_existing_key(Table* table, uint32_t key);
+
 void initialize_leaf_node(void* node);
 void set_node_root(void* node, bool is_root);
 Cursor* table_find(Table* table, uint32_t key);
@@ -119,6 +123,8 @@ uint32_t* internal_node_cell(void* node, uint32_t cell_num);
 void internal_node_insert(Table* table, uint32_t parent_page_num, uint32_t child_page_num);
 void update_internal_node_key(void* node, uint32_t old_key, uint32_t new_key);
 uint32_t internal_node_find_child(void* node, uint32_t key);
+ExecuteResult execute_update(Statement* statement, Table* table);
+void serialize_update_row(Row* source, void* destination,const char* field);
 
 #endif
 

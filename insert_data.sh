@@ -153,29 +153,30 @@ COMMANDS="${COMMANDS}select\n"
 # Add exit to terminate the program
 COMMANDS="${COMMANDS}.exit\n"
 
-# Create a temporary script with all commands
-TMP_SCRIPT=$(mktemp)
-printf "%b" "$COMMANDS" > "$TMP_SCRIPT"
+# Run each command individually to ensure we can catch failures
+IFS=$'\n' read -d '' -r -A command_array <<< "${COMMANDS//$'\n'/$'\n'}"
 
-echo "Running all commands from temporary script..."
-./maincode "$DB_FILE" < "$TMP_SCRIPT"
-EXIT_CODE=$?
-
-# Clean up
-rm -f "$TMP_SCRIPT"
-
-# Check if database has content
-if [ -f "$DB_FILE" ]; then
-    FILE_SIZE=$(stat -f%z "$DB_FILE" 2>/dev/null || stat -c%s "$DB_FILE")
-    echo "Database file size: $FILE_SIZE bytes"
-    if [ "$FILE_SIZE" -eq 0 ]; then
-        echo "Warning: Database file is empty!"
-        exit 1
+for cmd in "${command_array[@]}"; do
+    if [ -n "$cmd" ]; then  # Skip empty lines
+        echo "Executing: $cmd"
+        echo "$cmd" | ./maincode "$DB_FILE"
+        EXIT_CODE=$?
+        
+        if [ $EXIT_CODE -ne 0 ]; then
+            echo "Command failed with exit code $EXIT_CODE: $cmd"
+            exit $EXIT_CODE
+        fi
+        
+        # Verify insert worked by checking select output
+        if [[ "$cmd" == insert* ]]; then
+            key=$(echo "$cmd" | awk '{print $2}')
+            echo "select" | ./maincode "$DB_FILE" | grep -q "$key" || {
+                echo "Failed to verify insert of key $key"
+                exit 1
+            }
+        fi
     fi
-else
-    echo "Error: Database file was not created!"
-    exit 1
-fi
+done
 
 if [ $EXIT_CODE -ne 0 ]; then
   echo "Program exited with code $EXIT_CODE. Insertion may have failed."
