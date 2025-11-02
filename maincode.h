@@ -23,7 +23,9 @@ typedef enum { NODE_INTERNAL, NODE_LEAF } NodeType;
 typedef enum  { 
   EXECUTE_SUCCESS, 
   EXECUTE_TABLE_FULL, 
-  EXECUTE_DUPLICATE_KEY 
+  EXECUTE_DUPLICATE_KEY ,
+  EXECUTE_KEY_NOT_FOUND,
+  EXECUTE_FAILURE
 }ExecuteResult;
 
 typedef enum {

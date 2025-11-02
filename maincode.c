@@ -468,10 +468,26 @@ Cursor* table_find(Table* table, uint32_t key) {
 }
 
 Cursor* find_existing_key(Table* table, uint32_t key){
-  uint32_t root_page_num = table->root_page_num;
-  void* root_node = get_page(table->pager, root_page_num);
+  Cursor* cursor = table_find(table, key);
+    if (!cursor) {
+        return NULL;
+    }
 
-  return internal_node_find(table, root_page_num, key);
+    void* node = get_page(table->pager, cursor->page_num);
+    uint32_t num_cells = *leaf_node_num_cells(node);
+    
+    if (cursor->cell_num >= num_cells) {
+        free(cursor);
+        return NULL;
+    }
+
+    uint32_t key_at_index = *leaf_node_key(node, cursor->cell_num);
+    if (key_at_index != key) {
+        free(cursor);
+        return NULL;
+    }
+
+    return cursor;
 }
 
 
@@ -834,42 +850,43 @@ void leaf_node_insert(Cursor* cursor, uint32_t key, Row* value){
 
 }
 
-void leaf_node_update(Cursor* cursor, uint32_t key, Row* value, const char* field){
-  //key is the reference for the row to be updated
-  //value is the new value to be set
-  printf("DEBUG: inside leaf_node_update function.\n");
-  void* node = get_page(cursor->table->pager, cursor->page_num);
-  uint32_t num_cells = *leaf_node_num_cells(node);
-  //debug statement
-  printf("Printing num_cells: %d\n", num_cells);
+void leaf_node_update(Cursor* cursor, uint32_t key, Row* value, const char* field) {
+    void* node = get_page(cursor->table->pager, cursor->page_num);
+    uint32_t num_cells = *leaf_node_num_cells(node);
 
-  if(cursor-> cell_num >= num_cells){
-    printf("Error: Key %d not found for update\n", key);
-    return;
-  }
-  printf("DEBUG: cursor->page_num %d", cursor->page_num);
-  printf("DEBUG: cursor->cell_num %d",cursor->cell_num);
-
-  // uint32_t key_print = *(leaf_node_key(node,cursor->cell_num));
-  // printf("DEBUG:The KEy we are updating is: %d\n",key_print);
-
-  uint32_t stored_key = *leaf_node_key(node, cursor->cell_num);
-  printf("DEBUG: stored_key=%u updating_key=%u\n", stored_key, key);
-  if (stored_key != key) {
-    printf("Error: Key mismatch: expected %u got %u\n", key, stored_key);
-    return;
-  }
-
-  if(*(leaf_node_key(node, cursor->cell_num))!=key){
-        printf("%d Key doesn't exist at all in db.\n");
-      }
-
-  
-  if(*(leaf_node_key(node, cursor->cell_num))==key){
-      serialize_update_row(value, leaf_node_value(node, cursor->cell_num), field);
+    // Basic validation
+    if(cursor->cell_num >= num_cells) {
+        printf("Error: Key %u not found for update\n", key);
+        return;
     }
-  
-  
+
+    // Validate key match
+    uint32_t stored_key = *leaf_node_key(node, cursor->cell_num);
+    if (stored_key != key) {
+        printf("Error: Key mismatch: expected %u got %u\n", key, stored_key);
+        return;
+    }
+
+    // Validate field name
+    if (strcmp(field, "username") != 0 && strcmp(field, "email") != 0) {
+        printf("Error: Invalid field name '%s'\n", field);
+        return;
+    }
+
+    // Get existing row data
+    void* dest = leaf_node_value(node, cursor->cell_num);
+    Row existing_row;
+    deserialize_row(dest, &existing_row);
+
+    // Update only the specified field
+    if (strcmp(field, "username") == 0) {
+        strncpy(existing_row.username, value->username, COLUMN_USERNAME_SIZE);
+    } else { // email
+        strncpy(existing_row.email, value->email, COLUMN_EMAIL_SIZE);
+    }
+
+    // Write back the complete updated row
+    serialize_row(&existing_row, dest);
 }
 
 void free_table(Table* table) {
@@ -960,52 +977,66 @@ PrepareResult prepare_insert(InputBuffer* input_buffer, Statement* statement) {
 }
 
 PrepareResult prepare_update(InputBuffer* input_buffer, Statement* statement) {
-  statement->type = STATEMENT_UPDATE;
+    statement->type = STATEMENT_UPDATE;
 
-  char* keyword = strtok(input_buffer->buffer, " ");
-  char* field = strtok(NULL, "=");
-  char* field_value = strtok(NULL, " ");
-  char* w_keyword = strtok(NULL, " ");
-  char* id_keyword = strtok(NULL, "=");
-  char* id_string = strtok(NULL, " ");
+    // Update syntax: update field=value where id=number
+    char* keyword = strtok(input_buffer->buffer, " ");    // "update"
+    char* field_part = strtok(NULL, " ");                 // "field=value"
+    char* where = strtok(NULL, " ");                      // "where"
+    char* id_part = strtok(NULL, " ");                    // "id=number"
 
-  strcpy(statement->field_to_be_updated, field);
-  
-  printf("DEBUG: inside prepare_update function.\n");
-  printf("DEBUG: field: %s\n", field);
-  printf("DEBUG: field_value: %s\n", field_value);
-  printf("DEBUG: id_string: %s\n", id_string);
-  printf("DEBUG: w_keyword: %s\n", w_keyword);
-  printf("DEBUG: id_keyword: %s\n", id_keyword);
-  printf("DEBUG: id_string: %s\n", id_string);
+    if (!field_part || !where || !id_part || 
+        strcmp(where, "where") != 0) {
+        return PREPARE_SYNTAX_ERROR;
+    }
 
-  if (id_string == NULL || field_value == NULL) {
-    return PREPARE_SYNTAX_ERROR;
-  }
+    // Parse field=value part
+    char* field = strtok(field_part, "=");
+    char* value = strtok(NULL, "=");
+    if (!field || !value) {
+        return PREPARE_SYNTAX_ERROR;
+    }
 
-  int id = atoi(id_string);
-  if (id < 0) {
-    return PREPARE_NEGATIVE_ID;
-  }
-  if (strlen(field) > COLUMN_USERNAME_SIZE || strlen(field) >COLUMN_EMAIL_SIZE) {
-    return PREPARE_STRING_TOO_LONG;
-  }
-  
-  //if(id_string )
-  //add error chk if id doesnt exist in db
-  statement->row_to_update.id = id;
-  
-  if(!(strcmp(field,"username"))){
-    
-    strcpy(statement->row_to_update.username, field_value);
-    printf("DEBUG: updated username to %s\n", statement->row_to_update.username);
-  }
-  
-  if(!(strcmp(field,"email"))){
-    strcpy(statement->row_to_update.email, field_value);
-    printf("DEBUG: updated email to %s\n", statement->row_to_update.email);
-  }
-  return PREPARE_SUCCESS;
+    // Parse id=number part
+    char* id_field = strtok(id_part, "=");
+    char* id_string = strtok(NULL, "=");
+    if (!id_field || !id_string || strcmp(id_field, "id") != 0) {
+        return PREPARE_SYNTAX_ERROR;
+    }
+
+    // Validate field name
+    if (strcmp(field, "username") != 0 && strcmp(field, "email") != 0) {
+        printf("Error: Can only update 'username' or 'email' fields.\n");
+        return PREPARE_SYNTAX_ERROR;
+    }
+
+    // Store field name
+    statement->field_to_be_updated = strdup(field);
+
+    // Parse and validate ID
+    int id = atoi(id_string);
+    if (id < 0) {
+        free(statement->field_to_be_updated);
+        return PREPARE_NEGATIVE_ID;
+    }
+
+    // Store ID and validate+store value based on field type
+    statement->row_to_update.id = id;
+    if (strcmp(field, "username") == 0) {
+        if (strlen(value) > COLUMN_USERNAME_SIZE) {
+            free(statement->field_to_be_updated);
+            return PREPARE_STRING_TOO_LONG;
+        }
+        strcpy(statement->row_to_update.username, value);
+    } else { // email
+        if (strlen(value) > COLUMN_EMAIL_SIZE) {
+            free(statement->field_to_be_updated);
+            return PREPARE_STRING_TOO_LONG;
+        }
+        strcpy(statement->row_to_update.email, value);
+    }
+
+    return PREPARE_SUCCESS;
 }
 
 PrepareResult prepare_statement(InputBuffer* input_buffer, Statement* statement) {
@@ -1071,18 +1102,17 @@ ExecuteResult execute_update(Statement* statement, Table* table) {
   Cursor* cursor = find_existing_key(table, key_to_update);
 
   //debug statements
-  printf("printing row_to_update: %s %s %d", row_to_update->username,row_to_update->email,row_to_update->id);
+  printf("printing row_to_update: %s %s %u", row_to_update->username,row_to_update->email,row_to_update->id);
   
-  
-  //if cursor= NULL doesnt work then just add the boolean function
-  if(cursor!=NULL){
-    leaf_node_update(cursor, row_to_update->id, row_to_update, statement->field_to_be_updated);
+  if (!cursor) {  // Add null check
+        return EXECUTE_KEY_NOT_FOUND;
   }
   
   
-
+  leaf_node_update(cursor, row_to_update->id, row_to_update, statement->field_to_be_updated);
+  
   free(cursor);
-
+  free(statement->field_to_be_updated);
   return EXECUTE_SUCCESS;
 }
 
