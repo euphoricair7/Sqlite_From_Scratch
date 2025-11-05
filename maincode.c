@@ -62,13 +62,6 @@ uint32_t get_unused_page_num(Pager* pager) { return pager->num_pages; }
 const uint32_t LEAF_NODE_RIGHT_SPLIT_COUNT = (LEAF_NODE_MAX_CELLS + 1) / 2;
 const uint32_t LEAF_NODE_LEFT_SPLIT_COUNT = (LEAF_NODE_MAX_CELLS + 1) - LEAF_NODE_RIGHT_SPLIT_COUNT;
 
-
-
-
-
-
-
-
 //Internal Node Implementation
 //common node header layout
 const uint32_t INTERNAL_NODE_NUM_KEYS_SIZE = sizeof(uint32_t);
@@ -1094,20 +1087,14 @@ ExecuteResult execute_select(Statement* statement, Table* table) {
 }
 
 ExecuteResult execute_update(Statement* statement, Table* table) {
-  printf("DEBUG: inside execute_update function.\n");
-
   Row* row_to_update = &(statement->row_to_update);
   uint32_t key_to_update = row_to_update->id;
   //understand table_find and write this func
   Cursor* cursor = find_existing_key(table, key_to_update);
-
-  //debug statements
-  printf("printing row_to_update: %s %s %u", row_to_update->username,row_to_update->email,row_to_update->id);
   
   if (!cursor) {  // Add null check
         return EXECUTE_KEY_NOT_FOUND;
   }
-  
   
   leaf_node_update(cursor, row_to_update->id, row_to_update, statement->field_to_be_updated);
   
