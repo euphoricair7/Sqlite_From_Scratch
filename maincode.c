@@ -1179,13 +1179,40 @@ void print_tree(Pager* pager, uint32_t page_num, uint32_t indentation_level){
 }
 
 int main(int argc, char* argv[]) {
-    if (argc < 2) {
+    char* db_list[2];
+
+    if (argc < 3) {
      printf("Must supply a database filename.\n");
      exit(EXIT_FAILURE);
    }
- 
-   char* filename = argv[1];
-   Table* table = db_open(filename);
+
+   db_list[0] = argv[1];
+   db_list[1] = argv[2];
+   
+   Table* table;
+
+   for(int i = 0; i < 2; i++){
+    db_list[i] = argv[i+1];
+    table = db_open(db_list[i]);
+   }
+
+   char db[50];
+   char* filename;
+
+   printf("Which database do you want to use?");
+   scanf("%s", db);
+
+   int c;
+  while ((c = getchar()) != '\n' && c != EOF);  // clear leftover newline
+
+   if(strcmp(db,db_list[0])==0){
+     filename = argv[1];
+   }
+   else if(strcmp(db,db_list[1])==0){
+    filename = argv[2];
+   }
+
+   //Table* table = db_open(filename);
    InputBuffer* input_buffer = new_input_buffer();
    while (true) {
      print_prompt();
