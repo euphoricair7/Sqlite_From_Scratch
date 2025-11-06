@@ -10,6 +10,7 @@
 #include "maincode.h"
 
 
+
 #define size_of_attribute(Struct, Attribute) sizeof(((Struct*)0)->Attribute)
 
 const uint32_t PAGE_SIZE = 4096;
@@ -84,6 +85,7 @@ const uint32_t INTERNAL_NODE_CHILD_SIZE = sizeof(uint32_t);
 const uint32_t INTERNAL_NODE_CELL_SIZE = INTERNAL_NODE_KEY_SIZE + INTERNAL_NODE_CHILD_SIZE;
 //accessing leaf node fields
 /* Keep this small for testing */
+const uint32_t INTERNAL_NODE_MAX_CELLS = 2;
 const uint32_t INTERNAL_NODE_MAX_CELLS = 2;
 
 //this function returns a pointer to the number of cells in the leaf node
@@ -832,6 +834,22 @@ Table* db_open(const char* filename) {
         void* root_node = get_page(pager, 0);
         initialize_leaf_node(root_node);
         set_node_root(root_node, true);
+    table->root_page_num = 0;
+
+    // Initialize constraints
+    init_constraints(&table->constraints);
+    
+    // Add primary key constraint for id column
+    add_primary_key_constraint(&table->constraints, "id");
+
+    //Add unique constraint to email column
+    add_unique_constraint(&table->constraints, "email");
+
+    if(pager->num_pages == 0) {
+        // New database file. Initialize page 0 as leaf node
+        void* root_node = get_page(pager, 0);
+        initialize_leaf_node(root_node);
+        set_node_root(root_node, true);
     }
     
     return table;
@@ -933,7 +951,54 @@ void add_unique_constraint(ConstraintList* list, const char* column_name) {
     constraint->is_enforced = true;
 }
 
+void init_constraints(ConstraintList* list) {
+    list->constraints = malloc(sizeof(Constraint) * 10); // Start with space for 10 constraints
+    list->num_constraints = 0;
+    list->max_constraints = 10;
+}
+
+void add_primary_key_constraint(ConstraintList* list, const char* column_name) {
+    if (list->num_constraints >= list->max_constraints) {
+        // Resize if needed
+        list->max_constraints *= 2;
+        list->constraints = realloc(list->constraints, sizeof(Constraint) * list->max_constraints);
+    }
+    
+    Constraint* constraint = &list->constraints[list->num_constraints++];
+    constraint->type = CONSTRAINT_PRIMARY_KEY;
+    strncpy(constraint->column_name, column_name, 31);
+    constraint->column_name[31] = '\0';  // Ensure null termination
+    constraint->is_enforced = true;
+}
+
+void add_unique_constraint(ConstraintList* list, const char* column_name) {
+    if (list->num_constraints >= list->max_constraints) {
+        // Resize if needed
+        list->max_constraints *= 2;
+        list->constraints = realloc(list->constraints, sizeof(Constraint) * list->max_constraints);
+    }
+    
+    Constraint* constraint = &list->constraints[list->num_constraints++];
+    constraint->type = CONSTRAINT_UNIQUE;
+    strncpy(constraint->column_name, column_name, 31);
+    constraint->column_name[31] = '\0';  // Ensure null termination
+    constraint->is_enforced = true;
+}
+
 void free_table(Table* table) {
+    if (table->pager) {
+        for (int i = 0; table->pager->pages[i]; i++) {
+            free(table->pager->pages[i]);
+        }
+        free(table->pager);
+    }
+    
+    // Free the constraints list
+    if (table->constraints.constraints) {
+        free(table->constraints.constraints);
+    }
+    
+    free(table);
     if (table->pager) {
         for (int i = 0; table->pager->pages[i]; i++) {
             free(table->pager->pages[i]);
@@ -1109,6 +1174,12 @@ PrepareResult prepare_statement(InputBuffer* input_buffer, Statement* statement)
     return PREPARE_SUCCESS;
   }
 
+
+  if(strncmp(input_buffer->buffer,"desc",4)==0){
+    statement->type=STATEMENT_DESC;
+    return PREPARE_SUCCESS;
+  }
+
   // if(strncmp(input_buffer->buffer,"delete",6)==0){
   //   return prepare_delete(input_buffer, statement);
   // }
@@ -1116,6 +1187,48 @@ PrepareResult prepare_statement(InputBuffer* input_buffer, Statement* statement)
   return PREPARE_UNRECOGNIZED_STATEMENT;
 }
 
+ExecuteResult check_unique_email(Table* table, const char* email) {
+    Cursor* cursor = table_start(table);
+    Row row;
+    
+    while (!cursor->end_of_table) {
+        deserialize_row(cursor_value(cursor), &row);
+        if (strcmp(row.email, email) == 0) {
+            free(cursor);
+            printf("Error: Email '%s' already exists (unique constraint violation)\n", email);
+            return EXECUTE_DUPLICATE_KEY;
+        }
+        cursor_advance(cursor);
+    }
+    
+    free(cursor);
+    return EXECUTE_SUCCESS;
+}
+
+ExecuteResult execute_insert(Statement* statement, Table* table) {
+    void* node = get_page(table->pager, table->root_page_num);
+    uint32_t num_cells = *(leaf_node_num_cells(node));
+    
+    Row* row_to_insert = &(statement->row_to_insert);
+    uint32_t key_to_insert = row_to_insert->id;
+
+    // Check primary key (ID) constraint
+    Cursor* cursor = table_find(table, key_to_insert);
+    if (cursor->cell_num < num_cells) {
+        uint32_t key_at_index = *leaf_node_key(node, cursor->cell_num);
+        if (key_at_index == key_to_insert) {
+            free(cursor);
+            printf("Error: Duplicate ID %d (primary key violation)\n", key_to_insert);
+            return CONSTRAINT_PRIMARY_KEY;
+        }
+    }
+
+    // Check unique email constraint
+    ExecuteResult email_result = check_unique_email(table, row_to_insert->email);
+    if (email_result == CONSTRAINT_UNIQUE) {
+        free(cursor);
+        return CONSTRAINT_UNIQUE;
+    }
 ExecuteResult check_unique_email(Table* table, const char* email) {
     Cursor* cursor = table_start(table);
     Row row;
@@ -1211,10 +1324,89 @@ ExecuteResult execute_update(Statement* statement, Table* table) {
     }
   }
 
+
+  // If updating email field, check uniqueness constraint
+  if (strcmp(statement->field_to_be_updated, "email") == 0) {
+    // Get current row to avoid checking against itself
+    Row current_row;
+    deserialize_row(cursor_value(cursor), &current_row);
+    
+    // Skip uniqueness check if new email is same as current
+    if (strcmp(current_row.email, row_to_update->email) != 0) {
+      ExecuteResult email_result = check_unique_email(table, row_to_update->email);
+      if (email_result == EXECUTE_DUPLICATE_KEY) {
+        free(cursor);
+        printf("Error: Email '%s' already exists (unique constraint violation)\n", 
+               row_to_update->email);
+        free(statement->field_to_be_updated);
+        return CONSTRAINT_UNIQUE;
+      }
+    }
+  }
+
   leaf_node_update(cursor, row_to_update->id, row_to_update, statement->field_to_be_updated);
   
   free(cursor);
   free(statement->field_to_be_updated);
+  return EXECUTE_SUCCESS;
+}
+
+// ExecuteResult execute_delete(Statement* statement, Table* table){
+
+// }
+
+ExecuteResult execute_desc(Statement* statement, Table* table) {
+  printf("\nTable Description:\n");
+  printf("----------------\n");
+  printf("Column Name     Type        Size    Constraints\n");
+  printf("----------------------------------------\n");
+
+  // For each column, we'll print its info and then its constraints
+  const char* columns[] = {"id", "username", "email"};
+  const char* types[] = {"INTEGER", "VARCHAR", "VARCHAR"};
+  const int sizes[] = {ID_SIZE, USERNAME_SIZE, EMAIL_SIZE};
+  
+  for (int i = 0; i < 3; i++) {
+    // Print column base info
+    printf("%-14s %-11s %-8d ", columns[i], types[i], sizes[i]);
+    
+    // Print constraints for this column
+    bool first_constraint = true;
+    for (uint32_t j = 0; j < table->constraints.num_constraints; j++) {
+      Constraint* constraint = &table->constraints.constraints[j];
+      if (constraint->is_enforced && strcmp(constraint->column_name, columns[i]) == 0) {
+        if (!first_constraint) {
+          printf(", ");
+        }
+        first_constraint = false;
+        
+        switch (constraint->type) {
+          case CONSTRAINT_PRIMARY_KEY:
+            printf("PRIMARY KEY");
+            break;
+          case CONSTRAINT_UNIQUE:
+            printf("UNIQUE");
+            break;
+          case CONSTRAINT_NOT_NULL:
+            printf("NOT NULL");
+            break;
+          default:
+            break;
+        }
+      }
+    }
+    printf("\n");  // New line after each column
+  }
+
+  printf("\nStorage Information:\n");
+  printf("------------------\n");
+  printf("Page size: %d bytes\n", PAGE_SIZE);
+  printf("Row size: %d bytes\n", ROW_SIZE);
+  printf("Max cells per leaf: %d (= (PageSize - HeaderSize) / (KeySize + RowSize))\n", LEAF_NODE_MAX_CELLS);
+  printf("                    = (%d - %d) / (%d + %d) = %d\n", 
+         PAGE_SIZE, LEAF_NODE_HEADER_SIZE, LEAF_NODE_KEY_SIZE, ROW_SIZE, LEAF_NODE_MAX_CELLS);
+  printf("Max keys per internal node: %d\n", INTERNAL_NODE_MAX_CELLS);
+
   return EXECUTE_SUCCESS;
 }
 
@@ -1289,6 +1481,9 @@ ExecuteResult execute_statement(Statement* statement, Table *table) {
     //   return execute_delete(statement, table);
     case (STATEMENT_DESC):
       return execute_desc(statement,table);
+    //   return execute_delete(statement, table);
+    case (STATEMENT_DESC):
+      return execute_desc(statement,table);
   }
 }
 
@@ -1360,8 +1555,11 @@ int main(int argc, char* argv[]) {
    }
 
 
+
+
  
    char* filename = argv[1];
+   
    
    Table* table = db_open(filename);
    InputBuffer* input_buffer = new_input_buffer();
@@ -1402,10 +1600,29 @@ int main(int argc, char* argv[]) {
     
     // Handle general execution results first
     if (result == EXECUTE_SUCCESS) {
+    ExecuteResult result = execute_statement(&statement, table);
+    
+    // Handle general execution results first
+    if (result == EXECUTE_SUCCESS) {
         printf("Executed.\n");
     }
     else if (result == EXECUTE_TABLE_FULL) {
+    }
+    else if (result == EXECUTE_TABLE_FULL) {
         printf("Error: Table full.\n");
+    }
+    else if (result == EXECUTE_KEY_NOT_FOUND) {
+        printf("Error: Key not found.\n");
+    }
+
+    // Handle constraint violations separately
+    //due to enum conflict between COnstraintType and ExecuteResult
+    else if (result == CONSTRAINT_PRIMARY_KEY) {
+        printf("Error: Primary key violation.\n");
+    }
+    else if (result == CONSTRAINT_UNIQUE) {
+        printf("Error: Unique constraint violation.\n");
+    }
     }
     else if (result == EXECUTE_KEY_NOT_FOUND) {
         printf("Error: Key not found.\n");
