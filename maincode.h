@@ -36,12 +36,19 @@ typedef enum {
   PREPARE_UNRECOGNIZED_STATEMENT
 } PrepareResult;
 
-typedef enum { STATEMENT_INSERT, STATEMENT_SELECT, STATEMENT_UPDATE, STATEMENT_DELETE } StatementType;
+typedef enum { STATEMENT_INSERT, STATEMENT_SELECT, STATEMENT_UPDATE, STATEMENT_DELETE, STATEMENT_DESC } StatementType;
 
 typedef enum{
     META_COMMAND_SUCCESS,
     META_COMMAND_UNRECOGNIZED_COMMAND
 } MetaCommandResult;
+ 
+typedef enum {
+    CONSTRAINT_PRIMARY_KEY,
+    CONSTRAINT_UNIQUE,
+    CONSTRAINT_NOT_NULL,
+    CONSTRAINT_DEFAULT_KEY
+} ConstraintType;
 
 
 // Structs
@@ -58,9 +65,25 @@ typedef struct {
   void* pages[TABLE_MAX_PAGES];
 } Pager;
 
+
+
+
+typedef struct {
+    ConstraintType type;
+    char column_name[32];  // Name of the column this constraint applies to
+    bool is_enforced;      // Whether the constraint is currently being enforced
+} Constraint;
+
+typedef struct {
+    Constraint* constraints;
+    uint32_t num_constraints;
+    uint32_t max_constraints;
+} ConstraintList;
+
 typedef struct {
   uint32_t root_page_num;
   Pager* pager;
+  ConstraintList constraints;  // Added constraints
 } Table;
 
 typedef struct {
@@ -83,6 +106,11 @@ typedef struct {
   ssize_t input_length;
 } InputBuffer;
 
+typedef struct {
+    char name[64];
+    char path[256];
+    time_t created_at;
+} DBMeta;
 
 
 // Function Prototypes
@@ -127,6 +155,11 @@ void update_internal_node_key(void* node, uint32_t old_key, uint32_t new_key);
 uint32_t internal_node_find_child(void* node, uint32_t key);
 ExecuteResult execute_update(Statement* statement, Table* table);
 void serialize_update_row(Row* source, void* destination,const char* field);
+
+//constraint defination
+void init_constraints(ConstraintList* list);
+void add_primary_key_constraint(ConstraintList* list, const char* column_name);
+void add_unique_constraint(ConstraintList* list, const char* column_name);
 
 #endif
 
