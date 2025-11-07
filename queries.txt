@@ -1,0 +1,33 @@
+# Meta Commands
+.exit
+.btree
+.constants
+
+# SQL Commands
+create table <table_name>
+insert into <table_name> <id> "<username>" "<email>"
+select * from <table_name>
+update <table_name> set <field>=<value> where id=<id>
+use <database_filename>
+
+# Example Usage
+
+# Create a new table called 'students'
+create table students
+
+# Insert a row into the 'default' table
+insert into default 1 "john_doe" "john.doe@example.com"
+
+# Insert a row into the 'students' table
+insert into students 101 "jane_doe" "jane.doe@example.com"
+
+# Select all rows from the 'default' table
+select * from default
+
+# Select all rows from the 'students' table
+select * from students
+
+# Update a row in the 'default' table
+update default set email="new.email@example.com" where id=1
+
+

@@ -20,13 +20,13 @@ to valid page numbers
 // Enums
 typedef enum { NODE_INTERNAL, NODE_LEAF } NodeType;
 
-typedef enum  { 
-  EXECUTE_SUCCESS, 
-  EXECUTE_TABLE_FULL, 
-  EXECUTE_DUPLICATE_KEY ,
+typedef enum  {
+  EXECUTE_SUCCESS,
+  EXECUTE_TABLE_FULL,
+  EXECUTE_DUPLICATE_KEY,
   EXECUTE_KEY_NOT_FOUND,
   EXECUTE_FAILURE
-}ExecuteResult;
+} ExecuteResult;
 
 typedef enum {
   PREPARE_SUCCESS,
@@ -36,19 +36,12 @@ typedef enum {
   PREPARE_UNRECOGNIZED_STATEMENT
 } PrepareResult;
 
-typedef enum { STATEMENT_INSERT, STATEMENT_SELECT, STATEMENT_UPDATE, STATEMENT_DELETE, STATEMENT_DESC } StatementType;
+typedef enum { STATEMENT_INSERT, STATEMENT_SELECT, STATEMENT_UPDATE, STATEMENT_DELETE, STATEMENT_CREATE_TABLE, STATEMENT_SHOW_TABLES, STATEMENT_DESC } StatementType;
 
 typedef enum{
     META_COMMAND_SUCCESS,
     META_COMMAND_UNRECOGNIZED_COMMAND
 } MetaCommandResult;
- 
-typedef enum {
-    CONSTRAINT_PRIMARY_KEY,
-    CONSTRAINT_UNIQUE,
-    CONSTRAINT_NOT_NULL,
-    CONSTRAINT_DEFAULT_KEY
-} ConstraintType;
 
 
 // Structs
@@ -65,26 +58,36 @@ typedef struct {
   void* pages[TABLE_MAX_PAGES];
 } Pager;
 
-
-
+typedef enum {
+  CONSTRAINT_PRIMARY_KEY,
+  CONSTRAINT_UNIQUE,
+  CONSTRAINT_NOT_NULL
+} ConstraintType;
 
 typedef struct {
-    ConstraintType type;
-    char column_name[32];  // Name of the column this constraint applies to
-    bool is_enforced;      // Whether the constraint is currently being enforced
+  ConstraintType type;
+  char column_name[32];
+  bool is_enforced;
 } Constraint;
 
 typedef struct {
-    Constraint* constraints;
-    uint32_t num_constraints;
-    uint32_t max_constraints;
+  Constraint* constraints;
+  int num_constraints;
+  int max_constraints;
 } ConstraintList;
 
 typedef struct {
   uint32_t root_page_num;
   Pager* pager;
-  ConstraintList constraints;  // Added constraints
+  ConstraintList constraints;
 } Table;
+
+typedef struct {
+    uint32_t num_tables;
+    Table* tables[TABLE_MAX_PAGES];
+    char* table_names[TABLE_MAX_PAGES];
+    Pager* pager;
+} Database;
 
 typedef struct {
   Table* table;
@@ -98,6 +101,7 @@ typedef struct {
   Row row_to_insert; //only used by insert statement
   Row row_to_update; //only used by update statement
   char* field_to_be_updated;
+  char table_name[COLUMN_USERNAME_SIZE + 1]; // Table name for the statement
 } Statement;
 
 typedef struct {
@@ -106,21 +110,14 @@ typedef struct {
   ssize_t input_length;
 } InputBuffer;
 
-typedef struct {
-    char name[64];
-    char path[256];
-    time_t created_at;
-} DBMeta;
-
-
 // Function Prototypes
 void print_row(Row* row);
 void serialize_row(Row* source, void* destination);
 void deserialize_row(void* source, Row* destination);
 void* get_page(Pager* pager, uint32_t page_num);
 Pager* pager_open(const char* filename);
-Table* db_open(const char* filename);
-void db_close(Table* table);
+Database* db_open(const char* filename);
+void db_close(Database* db);
 void print_constants();
 void print_tree(Pager* pager, uint32_t page_num, uint32_t indentation_level);
 NodeType get_node_type(void* node);
@@ -138,8 +135,8 @@ Cursor* table_find(Table* table, uint32_t key);
 Cursor* leaf_node_find(Table* table, uint32_t page_num, uint32_t key);
 Cursor* internal_node_find(Table* table, uint32_t page_num, uint32_t key);
 void* cursor_value(Cursor* cursor);
-ExecuteResult execute_statement(Statement* statement, Table *table);
-MetaCommandResult do_meta_command(InputBuffer* input_buffer, Table *table);
+ExecuteResult execute_statement(Statement* statement, Database *db);
+MetaCommandResult do_meta_command(InputBuffer* input_buffer, Database *db);
 void internal_node_split_and_insert(Table* table, uint32_t parent_page_num, uint32_t child_page_num);
 uint32_t get_node_max_key(Pager* pager, void* node);
 bool is_node_root(void* node);
@@ -155,11 +152,14 @@ void update_internal_node_key(void* node, uint32_t old_key, uint32_t new_key);
 uint32_t internal_node_find_child(void* node, uint32_t key);
 ExecuteResult execute_update(Statement* statement, Table* table);
 void serialize_update_row(Row* source, void* destination,const char* field);
-
-//constraint defination
+PrepareResult prepare_select(InputBuffer* input_buffer, Statement* statement);
+PrepareResult prepare_create_table(InputBuffer* input_buffer, Statement* statement);
+ExecuteResult execute_create_table(Statement* statement, Database* db);
+PrepareResult prepare_show_tables(InputBuffer* input_buffer, Statement* statement);
+ExecuteResult execute_show_tables(Statement* statement, Database* db);
+ExecuteResult execute_desc(Statement* statement, Table* table);
 void init_constraints(ConstraintList* list);
 void add_primary_key_constraint(ConstraintList* list, const char* column_name);
 void add_unique_constraint(ConstraintList* list, const char* column_name);
 
 #endif
-

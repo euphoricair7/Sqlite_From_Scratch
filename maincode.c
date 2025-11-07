@@ -9,8 +9,6 @@
 #include <errno.h>
 #include "maincode.h"
 
-
-
 #define size_of_attribute(Struct, Attribute) sizeof(((Struct*)0)->Attribute)
 
 const uint32_t PAGE_SIZE = 4096;
@@ -64,13 +62,6 @@ uint32_t get_unused_page_num(Pager* pager) { return pager->num_pages; }
 const uint32_t LEAF_NODE_RIGHT_SPLIT_COUNT = (LEAF_NODE_MAX_CELLS + 1) / 2;
 const uint32_t LEAF_NODE_LEFT_SPLIT_COUNT = (LEAF_NODE_MAX_CELLS + 1) - LEAF_NODE_RIGHT_SPLIT_COUNT;
 
-
-
-
-
-
-
-
 //Internal Node Implementation
 //common node header layout
 const uint32_t INTERNAL_NODE_NUM_KEYS_SIZE = sizeof(uint32_t);
@@ -85,8 +76,7 @@ const uint32_t INTERNAL_NODE_CHILD_SIZE = sizeof(uint32_t);
 const uint32_t INTERNAL_NODE_CELL_SIZE = INTERNAL_NODE_KEY_SIZE + INTERNAL_NODE_CHILD_SIZE;
 //accessing leaf node fields
 /* Keep this small for testing */
-const uint32_t INTERNAL_NODE_MAX_CELLS = 2;
-const uint32_t INTERNAL_NODE_MAX_CELLS = 2;
+const uint32_t INTERNAL_NODE_MAX_CELLS = 3;
 
 //this function returns a pointer to the number of cells in the leaf node
 uint32_t* leaf_node_num_cells(void* node){
@@ -265,6 +255,7 @@ uint32_t* internal_node_key(void* node, uint32_t key_num){
 
 NodeType get_node_type(void* node){
   uint8_t value = *((uint8_t*)(node+NODE_TYPE_OFFSET));
+  return (NodeType)value;
 }
 
 void set_node_type(void* node, NodeType type){
@@ -287,7 +278,7 @@ bool is_node_root(void* node){
 
 void set_node_root(void* node, bool is_root){
   uint8_t value = is_root;
-  *((uint32_t*)(node + IS_ROOT_OFFSET))=value;
+  *((uint8_t*)(node + IS_ROOT_OFFSET))=value;
 }
 /*About Leaf Nodes*/
 /*Btree Implementation*/
@@ -671,7 +662,7 @@ void serialize_update_row(Row* source, void* destination, const char* field) {
 
 }
 
-void deserialize_row(void *source, Row* destination) {
+void deserialize_row(void* source, Row* destination) {
   memcpy(&(destination->id), source + ID_OFFSET, ID_SIZE);
   memcpy(&(destination->username), source + USERNAME_OFFSET, USERNAME_SIZE);
   memcpy(&(destination->email), source + EMAIL_OFFSET, EMAIL_SIZE);
@@ -771,9 +762,8 @@ void pager_flush(Pager* pager, uint32_t page_num) {
 }
 
 
-void db_close(Table* table) {
-  Pager* pager = table->pager;
-  
+void db_close(Database* db) {
+  Pager* pager = db->pager;
   
 
   for (uint32_t i = 0; i < pager->num_pages; i++) {
@@ -810,49 +800,41 @@ void db_close(Table* table) {
     }
   }
   free(pager);
-  free(table);
+  for (uint32_t i = 0; i < db->num_tables; i++) {
+      free(db->tables[i]);
+      free(db->table_names[i]);
+  }
+  free(db);
 }
 
 
-Table* db_open(const char* filename) {
+Database* db_open(const char* filename) {
     Pager* pager = pager_open(filename);
-    Table* table = malloc(sizeof(Table));
-    table->pager = pager;
-    table->root_page_num = 0;
+    Database* db = malloc(sizeof(Database));
+    db->pager = pager;
+    db->num_tables = 0;
 
-    // Initialize constraints
-    init_constraints(&table->constraints);
-    
-    // Add primary key constraint for id column
-    add_primary_key_constraint(&table->constraints, "id");
-
-    //Add unique constraint to email column
-    add_unique_constraint(&table->constraints, "email");
-
-    if(pager->num_pages == 0) {
-        // New database file. Initialize page 0 as leaf node
-        void* root_node = get_page(pager, 0);
-        initialize_leaf_node(root_node);
-        set_node_root(root_node, true);
-    table->root_page_num = 0;
-
-    // Initialize constraints
-    init_constraints(&table->constraints);
-    
-    // Add primary key constraint for id column
-    add_primary_key_constraint(&table->constraints, "id");
-
-    //Add unique constraint to email column
-    add_unique_constraint(&table->constraints, "email");
-
-    if(pager->num_pages == 0) {
-        // New database file. Initialize page 0 as leaf node
+    if (pager->num_pages == 0) {
+        // New database file. Initialize page 0 as a leaf node.
         void* root_node = get_page(pager, 0);
         initialize_leaf_node(root_node);
         set_node_root(root_node, true);
     }
-    
-    return table;
+
+    // For now, we assume a single, "default" table at root page 0.
+    // This will be loaded for both new and existing databases.
+    Table* table = malloc(sizeof(Table));
+    table->pager = pager;
+    table->root_page_num = 0; 
+    init_constraints(&table->constraints);
+    add_primary_key_constraint(&table->constraints, "id");
+    add_unique_constraint(&table->constraints, "email");
+
+    db->tables[0] = table;
+    db->table_names[0] = strdup("default");
+    db->num_tables = 1;
+
+    return db;
 }
 
 void leaf_node_insert(Cursor* cursor, uint32_t key, Row* value){
@@ -951,54 +933,7 @@ void add_unique_constraint(ConstraintList* list, const char* column_name) {
     constraint->is_enforced = true;
 }
 
-void init_constraints(ConstraintList* list) {
-    list->constraints = malloc(sizeof(Constraint) * 10); // Start with space for 10 constraints
-    list->num_constraints = 0;
-    list->max_constraints = 10;
-}
-
-void add_primary_key_constraint(ConstraintList* list, const char* column_name) {
-    if (list->num_constraints >= list->max_constraints) {
-        // Resize if needed
-        list->max_constraints *= 2;
-        list->constraints = realloc(list->constraints, sizeof(Constraint) * list->max_constraints);
-    }
-    
-    Constraint* constraint = &list->constraints[list->num_constraints++];
-    constraint->type = CONSTRAINT_PRIMARY_KEY;
-    strncpy(constraint->column_name, column_name, 31);
-    constraint->column_name[31] = '\0';  // Ensure null termination
-    constraint->is_enforced = true;
-}
-
-void add_unique_constraint(ConstraintList* list, const char* column_name) {
-    if (list->num_constraints >= list->max_constraints) {
-        // Resize if needed
-        list->max_constraints *= 2;
-        list->constraints = realloc(list->constraints, sizeof(Constraint) * list->max_constraints);
-    }
-    
-    Constraint* constraint = &list->constraints[list->num_constraints++];
-    constraint->type = CONSTRAINT_UNIQUE;
-    strncpy(constraint->column_name, column_name, 31);
-    constraint->column_name[31] = '\0';  // Ensure null termination
-    constraint->is_enforced = true;
-}
-
 void free_table(Table* table) {
-    if (table->pager) {
-        for (int i = 0; table->pager->pages[i]; i++) {
-            free(table->pager->pages[i]);
-        }
-        free(table->pager);
-    }
-    
-    // Free the constraints list
-    if (table->constraints.constraints) {
-        free(table->constraints.constraints);
-    }
-    
-    free(table);
     if (table->pager) {
         for (int i = 0; table->pager->pages[i]; i++) {
             free(table->pager->pages[i]);
@@ -1029,16 +964,23 @@ void close_input_buffer(InputBuffer* input_buffer) {
 
 
 
-MetaCommandResult do_meta_command(InputBuffer* input_buffer, Table *table) {
+MetaCommandResult do_meta_command(InputBuffer* input_buffer, Database *db) {
   if (strcmp(input_buffer->buffer, ".exit") == 0) {
-    db_close(table);
+    db_close(db);
     exit(EXIT_SUCCESS);
   } else if (strcmp(input_buffer->buffer, ".btree") == 0) {
     printf("Tree:\n");
-    print_tree(table->pager, 0, 0);
+    // Note: This will print the tree for the first table.
+    // You might want to specify which table's tree to print.
+    if (db->num_tables > 0) {
+        // For now, let's assume desc is for the first table
+        // A better implementation would parse the table name
+        execute_desc(&statement, db->tables[0]);
+    } else {
+        printf("No tables in database.\n");
+    }
     return META_COMMAND_SUCCESS;
-
-} else if (strcmp(input_buffer->buffer, ".constants") == 0) {
+  } else if (strcmp(input_buffer->buffer, ".constants") == 0) {
     printf("Constants:\n");
     print_constants();
     return META_COMMAND_SUCCESS;
@@ -1063,15 +1005,26 @@ void read_input(InputBuffer* input_buffer) {
   input_buffer->buffer[bytes_read - 1] = '\0';
 }
 
+Table* get_table(Database* db, const char* table_name) {
+    for (uint32_t i = 0; i < db->num_tables; i++) {
+        if (strcmp(db->table_names[i], table_name) == 0) {
+            return db->tables[i];
+        }
+    }
+    return NULL;
+}
+
 PrepareResult prepare_insert(InputBuffer* input_buffer, Statement* statement) {
   statement->type = STATEMENT_INSERT;
 
   char* keyword = strtok(input_buffer->buffer, " ");
+  char* into_keyword = strtok(NULL, " ");
+  char* table_name = strtok(NULL, " ");
   char* id_string = strtok(NULL, " ");
   char* username = strtok(NULL, " ");
   char* email = strtok(NULL, " ");
 
-  if (id_string == NULL || username == NULL || email == NULL) {
+  if (id_string == NULL || username == NULL || email == NULL || into_keyword == NULL || strcmp(into_keyword, "into") != 0) {
     return PREPARE_SYNTAX_ERROR;
   }
 
@@ -1089,6 +1042,7 @@ PrepareResult prepare_insert(InputBuffer* input_buffer, Statement* statement) {
   statement->row_to_insert.id = id;
   strcpy(statement->row_to_insert.username, username);
   strcpy(statement->row_to_insert.email, email);
+  strcpy(statement->table_name, table_name);
 
   return PREPARE_SUCCESS;
 }
@@ -1098,15 +1052,18 @@ PrepareResult prepare_update(InputBuffer* input_buffer, Statement* statement) {
 
     // Update syntax: update field=value where id=number
     char* keyword = strtok(input_buffer->buffer, " ");    // "update"
+    char* table_name = strtok(NULL, " ");
+    char* set_keyword = strtok(NULL, " ");
     char* field_part = strtok(NULL, " ");                 // "field=value"
     char* where = strtok(NULL, " ");                      // "where"
     char* id_part = strtok(NULL, " ");                    // "id=number"
 
     if (!field_part || !where || !id_part || 
-        strcmp(where, "where") != 0) {
+        strcmp(where, "where") != 0 || strcmp(set_keyword, "set") != 0) {
         return PREPARE_SYNTAX_ERROR;
     }
 
+    strcpy(statement->table_name, table_name);
     // Parse field=value part
     char* field = strtok(field_part, "=");
     char* value = strtok(NULL, "=");
@@ -1157,94 +1114,70 @@ PrepareResult prepare_update(InputBuffer* input_buffer, Statement* statement) {
 }
 
 
+
+
+PrepareResult prepare_select(InputBuffer* input_buffer, Statement* statement){
+  statement->type = STATEMENT_SELECT;
+
+  strtok(input_buffer->buffer, " "); // "select"
+  char* from_keyword = strtok(NULL, " ");
+  if (from_keyword == NULL || (strcmp(from_keyword, "*") == 0 && strcmp(strtok(NULL, " "), "from") != 0)) {
+      // Handles "select *" and "select from"
+      strtok(NULL, " "); // for "from" if it exists
+  }
+  
+  char* table_name = strtok(NULL, " ");
+
+  if (table_name == NULL) {
+    return PREPARE_SYNTAX_ERROR;
+  }
+  strcpy(statement->table_name, table_name);
+  return PREPARE_SUCCESS;
+}
+
+PrepareResult prepare_create_table(InputBuffer* input_buffer, Statement* statement) {
+  statement->type = STATEMENT_CREATE_TABLE;
+
+  char* keyword = strtok(input_buffer->buffer, " "); // "create"
+  char* table_keyword = strtok(NULL, " "); // "table"
+  char* table_name = strtok(NULL, " ");
+
+  if (table_name == NULL || strcmp(table_keyword, "table") != 0) {
+    return PREPARE_SYNTAX_ERROR;
+  }
+
+  strcpy(statement->table_name, table_name);
+
+  return PREPARE_SUCCESS;
+}
+
+PrepareResult prepare_show_tables(InputBuffer* input_buffer, Statement* statement) {
+  statement->type = STATEMENT_SHOW_TABLES;
+  return PREPARE_SUCCESS;
+}
+
 PrepareResult prepare_statement(InputBuffer* input_buffer, Statement* statement) {
   if (strncmp(input_buffer->buffer, "insert", 6) == 0) {
     return prepare_insert(input_buffer, statement);
   }
-  if (strcmp(input_buffer->buffer, "select") == 0) {
-    statement->type = STATEMENT_SELECT;
-    return PREPARE_SUCCESS;
+  if (strncmp(input_buffer->buffer, "select",6) == 0) {
+    return prepare_select(input_buffer, statement);
   }
   if(strncmp(input_buffer->buffer,"update",6)==0){
     return prepare_update(input_buffer, statement);
   }
-
+  if (strncmp(input_buffer->buffer, "create table", 12) == 0) {
+    return prepare_create_table(input_buffer, statement);
+  }
+  if (strcmp(input_buffer->buffer, "show tables") == 0) {
+    return prepare_show_tables(input_buffer, statement);
+  }
   if(strncmp(input_buffer->buffer,"desc",4)==0){
     statement->type=STATEMENT_DESC;
     return PREPARE_SUCCESS;
   }
-
-
-  if(strncmp(input_buffer->buffer,"desc",4)==0){
-    statement->type=STATEMENT_DESC;
-    return PREPARE_SUCCESS;
-  }
-
-  // if(strncmp(input_buffer->buffer,"delete",6)==0){
-  //   return prepare_delete(input_buffer, statement);
-  // }
 
   return PREPARE_UNRECOGNIZED_STATEMENT;
-}
-
-ExecuteResult check_unique_email(Table* table, const char* email) {
-    Cursor* cursor = table_start(table);
-    Row row;
-    
-    while (!cursor->end_of_table) {
-        deserialize_row(cursor_value(cursor), &row);
-        if (strcmp(row.email, email) == 0) {
-            free(cursor);
-            printf("Error: Email '%s' already exists (unique constraint violation)\n", email);
-            return EXECUTE_DUPLICATE_KEY;
-        }
-        cursor_advance(cursor);
-    }
-    
-    free(cursor);
-    return EXECUTE_SUCCESS;
-}
-
-ExecuteResult execute_insert(Statement* statement, Table* table) {
-    void* node = get_page(table->pager, table->root_page_num);
-    uint32_t num_cells = *(leaf_node_num_cells(node));
-    
-    Row* row_to_insert = &(statement->row_to_insert);
-    uint32_t key_to_insert = row_to_insert->id;
-
-    // Check primary key (ID) constraint
-    Cursor* cursor = table_find(table, key_to_insert);
-    if (cursor->cell_num < num_cells) {
-        uint32_t key_at_index = *leaf_node_key(node, cursor->cell_num);
-        if (key_at_index == key_to_insert) {
-            free(cursor);
-            printf("Error: Duplicate ID %d (primary key violation)\n", key_to_insert);
-            return CONSTRAINT_PRIMARY_KEY;
-        }
-    }
-
-    // Check unique email constraint
-    ExecuteResult email_result = check_unique_email(table, row_to_insert->email);
-    if (email_result == CONSTRAINT_UNIQUE) {
-        free(cursor);
-        return CONSTRAINT_UNIQUE;
-    }
-ExecuteResult check_unique_email(Table* table, const char* email) {
-    Cursor* cursor = table_start(table);
-    Row row;
-    
-    while (!cursor->end_of_table) {
-        deserialize_row(cursor_value(cursor), &row);
-        if (strcmp(row.email, email) == 0) {
-            free(cursor);
-            printf("Error: Email '%s' already exists (unique constraint violation)\n", email);
-            return EXECUTE_DUPLICATE_KEY;
-        }
-        cursor_advance(cursor);
-    }
-    
-    free(cursor);
-    return EXECUTE_SUCCESS;
 }
 
 ExecuteResult execute_insert(Statement* statement, Table* table) {
@@ -1279,6 +1212,7 @@ ExecuteResult execute_insert(Statement* statement, Table* table) {
 }
 
 ExecuteResult execute_select(Statement* statement, Table* table) {
+
     Cursor* cursor = table_start(table);
     Row row;
     while (!(cursor->end_of_table)) {
@@ -1304,26 +1238,6 @@ ExecuteResult execute_update(Statement* statement, Table* table) {
   if (!cursor) {  // Add null check
     return EXECUTE_KEY_NOT_FOUND;
   }
-
-  // If updating email field, check uniqueness constraint
-  if (strcmp(statement->field_to_be_updated, "email") == 0) {
-    // Get current row to avoid checking against itself
-    Row current_row;
-    deserialize_row(cursor_value(cursor), &current_row);
-    
-    // Skip uniqueness check if new email is same as current
-    if (strcmp(current_row.email, row_to_update->email) != 0) {
-      ExecuteResult email_result = check_unique_email(table, row_to_update->email);
-      if (email_result == EXECUTE_DUPLICATE_KEY) {
-        free(cursor);
-        printf("Error: Email '%s' already exists (unique constraint violation)\n", 
-               row_to_update->email);
-        free(statement->field_to_be_updated);
-        return CONSTRAINT_UNIQUE;
-      }
-    }
-  }
-
 
   // If updating email field, check uniqueness constraint
   if (strcmp(statement->field_to_be_updated, "email") == 0) {
@@ -1410,66 +1324,49 @@ ExecuteResult execute_desc(Statement* statement, Table* table) {
   return EXECUTE_SUCCESS;
 }
 
-// ExecuteResult execute_delete(Statement* statement, Table* table){
+ExecuteResult execute_show_tables(Statement* statement, Database* db) {
+  printf("Tables:\n");
+  for (uint32_t i = 0; i < db->num_tables; i++) {
+    printf("- %s\n", db->table_names[i]);
+  }
+  return EXECUTE_SUCCESS;
+}
 
-// }
-
-ExecuteResult execute_desc(Statement* statement, Table* table) {
-  printf("\nTable Description:\n");
-  printf("----------------\n");
-  printf("Column Name     Type        Size    Constraints\n");
-  printf("----------------------------------------\n");
-
-  // For each column, we'll print its info and then its constraints
-  const char* columns[] = {"id", "username", "email"};
-  const char* types[] = {"INTEGER", "VARCHAR", "VARCHAR"};
-  const int sizes[] = {ID_SIZE, USERNAME_SIZE, EMAIL_SIZE};
-  
-  for (int i = 0; i < 3; i++) {
-    // Print column base info
-    printf("%-14s %-11s %-8d ", columns[i], types[i], sizes[i]);
-    
-    // Print constraints for this column
-    bool first_constraint = true;
-    for (uint32_t j = 0; j < table->constraints.num_constraints; j++) {
-      Constraint* constraint = &table->constraints.constraints[j];
-      if (constraint->is_enforced && strcmp(constraint->column_name, columns[i]) == 0) {
-        if (!first_constraint) {
-          printf(", ");
-        }
-        first_constraint = false;
-        
-        switch (constraint->type) {
-          case CONSTRAINT_PRIMARY_KEY:
-            printf("PRIMARY KEY");
-            break;
-          case CONSTRAINT_UNIQUE:
-            printf("UNIQUE");
-            break;
-          case CONSTRAINT_NOT_NULL:
-            printf("NOT NULL");
-            break;
-          default:
-            break;
-        }
-      }
-    }
-    printf("\n");  // New line after each column
+ExecuteResult execute_create_table(Statement* statement, Database* db) {
+  if (db->num_tables >= TABLE_MAX_PAGES) {
+    return EXECUTE_TABLE_FULL;
   }
 
-  printf("\nStorage Information:\n");
-  printf("------------------\n");
-  printf("Page size: %d bytes\n", PAGE_SIZE);
-  printf("Row size: %d bytes\n", ROW_SIZE);
-  printf("Max cells per leaf: %d (= (PageSize - HeaderSize) / (KeySize + RowSize))\n", LEAF_NODE_MAX_CELLS);
-  printf("                    = (%d - %d) / (%d + %d) = %d\n", 
-         PAGE_SIZE, LEAF_NODE_HEADER_SIZE, LEAF_NODE_KEY_SIZE, ROW_SIZE, LEAF_NODE_MAX_CELLS);
-  printf("Max keys per internal node: %d\n", INTERNAL_NODE_MAX_CELLS);
+  char* table_name = statement->table_name;
+  for (uint32_t i = 0; i < db->num_tables; i++) {
+    if (strcmp(db->table_names[i], table_name) == 0) {
+      printf("Error: Table '%s' already exists.\n", table_name);
+      return EXECUTE_FAILURE;
+    }
+  }
+
+  uint32_t new_root_page_num = get_unused_page_num(db->pager);
+  void* root_node = get_page(db->pager, new_root_page_num);
+  initialize_leaf_node(root_node);
+  set_node_root(root_node, true);
+
+  Table* table = malloc(sizeof(Table));
+  table->pager = db->pager;
+  table->root_page_num = new_root_page_num;
+
+  db->tables[db->num_tables] = table;
+  db->table_names[db->num_tables] = strdup(table_name);
+  db->num_tables++;
 
   return EXECUTE_SUCCESS;
 }
 
-ExecuteResult execute_statement(Statement* statement, Table *table) {
+ExecuteResult execute_statement(Statement* statement, Database *db) {
+  Table* table = get_table(db, statement->table_name);
+  if (table == NULL && statement->type != STATEMENT_CREATE_TABLE && statement->type != STATEMENT_SHOW_TABLES && statement->type != STATEMENT_DESC) {
+      printf("Table %s not found.\n", statement->table_name);
+      return EXECUTE_FAILURE;
+  }
   switch (statement->type) {
     case (STATEMENT_INSERT):
       return execute_insert(statement, table);
@@ -1477,14 +1374,14 @@ ExecuteResult execute_statement(Statement* statement, Table *table) {
       return execute_select(statement, table);
     case (STATEMENT_UPDATE):
       return execute_update(statement,table);
-    // case (STATEMENT_DELETE):
-    //   return execute_delete(statement, table);
-    case (STATEMENT_DESC):
-      return execute_desc(statement,table);
-    //   return execute_delete(statement, table);
+    case (STATEMENT_CREATE_TABLE):
+      return execute_create_table(statement, db);
+    case (STATEMENT_SHOW_TABLES):
+      return execute_show_tables(statement, db);
     case (STATEMENT_DESC):
       return execute_desc(statement,table);
   }
+  return EXECUTE_FAILURE;
 }
 
 
@@ -1549,26 +1446,21 @@ void print_tree(Pager* pager, uint32_t page_num, uint32_t indentation_level){
 }
 
 int main(int argc, char* argv[]) {
-    if (argc < 2) {
+   if (argc < 2) {
      printf("Must supply a database filename.\n");
      exit(EXIT_FAILURE);
    }
 
-
-
-
- 
    char* filename = argv[1];
-   
-   
-   Table* table = db_open(filename);
+   Database* db = db_open(filename);
+
    InputBuffer* input_buffer = new_input_buffer();
    while (true) {
      print_prompt();
      read_input(input_buffer);
 
     if (input_buffer->buffer[0] == '.') {
-      switch (do_meta_command(input_buffer, table)) {
+      switch (do_meta_command(input_buffer, db)) {
         case (META_COMMAND_SUCCESS):
           continue;
         case (META_COMMAND_UNRECOGNIZED_COMMAND):
@@ -1596,33 +1488,14 @@ int main(int argc, char* argv[]) {
         continue;
     }
 
-    ExecuteResult result = execute_statement(&statement, table);
-    
-    // Handle general execution results first
-    if (result == EXECUTE_SUCCESS) {
-    ExecuteResult result = execute_statement(&statement, table);
+    ExecuteResult result = execute_statement(&statement, db);
     
     // Handle general execution results first
     if (result == EXECUTE_SUCCESS) {
         printf("Executed.\n");
     }
     else if (result == EXECUTE_TABLE_FULL) {
-    }
-    else if (result == EXECUTE_TABLE_FULL) {
         printf("Error: Table full.\n");
-    }
-    else if (result == EXECUTE_KEY_NOT_FOUND) {
-        printf("Error: Key not found.\n");
-    }
-
-    // Handle constraint violations separately
-    //due to enum conflict between COnstraintType and ExecuteResult
-    else if (result == CONSTRAINT_PRIMARY_KEY) {
-        printf("Error: Primary key violation.\n");
-    }
-    else if (result == CONSTRAINT_UNIQUE) {
-        printf("Error: Unique constraint violation.\n");
-    }
     }
     else if (result == EXECUTE_KEY_NOT_FOUND) {
         printf("Error: Key not found.\n");
