@@ -973,9 +973,7 @@ MetaCommandResult do_meta_command(InputBuffer* input_buffer, Database *db) {
     // Note: This will print the tree for the first table.
     // You might want to specify which table's tree to print.
     if (db->num_tables > 0) {
-        // For now, let's assume desc is for the first table
-        // A better implementation would parse the table name
-        execute_desc(&statement, db->tables[0]);
+        print_tree(db->tables[0]->pager, db->tables[0]->root_page_num, 0);
     } else {
         printf("No tables in database.\n");
     }
@@ -1114,7 +1112,22 @@ PrepareResult prepare_update(InputBuffer* input_buffer, Statement* statement) {
 }
 
 
-
+ExecuteResult check_unique_email(Table* table, const char* email) {
+    Cursor* cursor = table_start(table);
+    Row row;
+    
+    while (!cursor->end_of_table) {
+        deserialize_row(cursor_value(cursor), &row);
+        if (strcmp(row.email, email) == 0) {
+            free(cursor);
+            return EXECUTE_DUPLICATE_KEY;
+        }
+        cursor_advance(cursor);
+    }
+    
+    free(cursor);
+    return EXECUTE_SUCCESS;
+}
 
 PrepareResult prepare_select(InputBuffer* input_buffer, Statement* statement){
   statement->type = STATEMENT_SELECT;
@@ -1174,6 +1187,12 @@ PrepareResult prepare_statement(InputBuffer* input_buffer, Statement* statement)
   }
   if(strncmp(input_buffer->buffer,"desc",4)==0){
     statement->type=STATEMENT_DESC;
+    strtok(input_buffer->buffer, " ");
+    char* table_name = strtok(NULL, " ");
+    if (table_name == NULL) {
+        return PREPARE_SYNTAX_ERROR;
+    }
+    strcpy(statement->table_name, table_name);
     return PREPARE_SUCCESS;
   }
 
@@ -1194,15 +1213,15 @@ ExecuteResult execute_insert(Statement* statement, Table* table) {
         if (key_at_index == key_to_insert) {
             free(cursor);
             printf("Error: Duplicate ID %d (primary key violation)\n", key_to_insert);
-            return CONSTRAINT_PRIMARY_KEY;
+            return EXECUTE_CONSTRAINT_PRIMARY_KEY;
         }
     }
 
     // Check unique email constraint
     ExecuteResult email_result = check_unique_email(table, row_to_insert->email);
-    if (email_result == CONSTRAINT_UNIQUE) {
+    if (email_result == EXECUTE_DUPLICATE_KEY) {
         free(cursor);
-        return CONSTRAINT_UNIQUE;
+        return EXECUTE_CONSTRAINT_UNIQUE;
     }
 
     // If all constraints pass, insert the row
@@ -1253,7 +1272,7 @@ ExecuteResult execute_update(Statement* statement, Table* table) {
         printf("Error: Email '%s' already exists (unique constraint violation)\n", 
                row_to_update->email);
         free(statement->field_to_be_updated);
-        return CONSTRAINT_UNIQUE;
+        return EXECUTE_CONSTRAINT_UNIQUE;
       }
     }
   }
@@ -1503,10 +1522,10 @@ int main(int argc, char* argv[]) {
 
     // Handle constraint violations separately
     //due to enum conflict between COnstraintType and ExecuteResult
-    else if (result == CONSTRAINT_PRIMARY_KEY) {
+    else if (result == EXECUTE_CONSTRAINT_PRIMARY_KEY) {
         printf("Error: Primary key violation.\n");
     }
-    else if (result == CONSTRAINT_UNIQUE) {
+    else if (result == EXECUTE_CONSTRAINT_UNIQUE) {
         printf("Error: Unique constraint violation.\n");
     }
    }

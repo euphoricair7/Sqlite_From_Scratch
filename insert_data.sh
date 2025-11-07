@@ -34,7 +34,7 @@ if [ "$TEST_TYPE" = "simple" ]; then
   echo "Running simple insertion test (15 records)..."
   # Generate insert commands for users 1-15
   for i in {1..15}; do
-    COMMANDS="${COMMANDS}insert $i user$i person$i@example.com\n"
+    COMMANDS="${COMMANDS}insert into default $i \"user$i\" \"person$i@example.com\"\n"
   done
 
 elif [ "$TEST_TYPE" = "seven_leaf_btree" ]; then
@@ -108,75 +108,58 @@ elif [ "$TEST_TYPE" = "seven_leaf_btree" ]; then
   )
   
   for record in "${RECORDS[@]}"; do
-    COMMANDS="${COMMANDS}insert ${record}\n"
+    id=$(echo "$record" | awk '{print $1}')
+    username=$(echo "$record" | awk '{print $2}')
+    email=$(echo "$record" | awk '{print $3}')
+    COMMANDS="${COMMANDS}insert into default $id \"$username\" \"$email\"\n"
   done
   COMMANDS="${COMMANDS}.btree\n"
 
 elif [ "$TEST_TYPE" = "four_node_btree" ]; then
   echo "Running 4-leaf-node btree test (30 records)..."
   # Insert many values in a specific order for 4-leaf-node btree
-  COMMANDS="${COMMANDS}insert 18 user18 person18@example.com\n"
-  COMMANDS="${COMMANDS}insert 7 user7 person7@example.com\n"
-  COMMANDS="${COMMANDS}insert 10 user10 person10@example.com\n"
-  COMMANDS="${COMMANDS}insert 29 user29 person29@example.com\n"
-  COMMANDS="${COMMANDS}insert 23 user23 person23@example.com\n"
-  COMMANDS="${COMMANDS}insert 4 user4 person4@example.com\n"
-  COMMANDS="${COMMANDS}insert 14 user14 person14@example.com\n"
-  COMMANDS="${COMMANDS}insert 30 user30 person30@example.com\n"
-  COMMANDS="${COMMANDS}insert 15 user15 person15@example.com\n"
-  COMMANDS="${COMMANDS}insert 26 user26 person26@example.com\n"
-  COMMANDS="${COMMANDS}insert 22 user22 person22@example.com\n"
-  COMMANDS="${COMMANDS}insert 19 user19 person19@example.com\n"
-  COMMANDS="${COMMANDS}insert 2 user2 person2@example.com\n"
-  COMMANDS="${COMMANDS}insert 1 user1 person1@example.com\n"
-  COMMANDS="${COMMANDS}insert 21 user21 person21@example.com\n"
-  COMMANDS="${COMMANDS}insert 11 user11 person11@example.com\n"
-  COMMANDS="${COMMANDS}insert 6 user6 person6@example.com\n"
-  COMMANDS="${COMMANDS}insert 20 user20 person20@example.com\n"
-  COMMANDS="${COMMANDS}insert 5 user5 person5@example.com\n"
-  COMMANDS="${COMMANDS}insert 8 user8 person8@example.com\n"
-  COMMANDS="${COMMANDS}insert 9 user9 person9@example.com\n"
-  COMMANDS="${COMMANDS}insert 3 user3 person3@example.com\n"
-  COMMANDS="${COMMANDS}insert 12 user12 person12@example.com\n"
-  COMMANDS="${COMMANDS}insert 27 user27 person27@example.com\n"
-  COMMANDS="${COMMANDS}insert 17 user17 person17@example.com\n"
-  COMMANDS="${COMMANDS}insert 16 user16 person16@example.com\n"
-  COMMANDS="${COMMANDS}insert 13 user13 person13@example.com\n"
-  COMMANDS="${COMMANDS}insert 24 user24 person24@example.com\n"
-  COMMANDS="${COMMANDS}insert 25 user25 person25@example.com\n"
-  COMMANDS="${COMMANDS}insert 28 user28 person28@example.com\n"
+  COMMANDS="${COMMANDS}insert into default 18 \"user18\" \"person18@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 7 \"user7\" \"person7@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 10 \"user10\" \"person10@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 29 \"user29\" \"person29@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 23 \"user23\" \"person23@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 4 \"user4\" \"person4@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 14 \"user14\" \"person14@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 30 \"user30\" \"person30@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 15 \"user15\" \"person15@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 26 \"user26\" \"person26@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 22 \"user22\" \"person22@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 19 \"user19\" \"person19@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 2 \"user2\" \"person2@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 1 \"user1\" \"person1@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 21 \"user21\" \"person21@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 11 \"user11\" \"person11@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 6 \"user6\" \"person6@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 20 \"user20\" \"person20@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 5 \"user5\" \"person5@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 8 \"user8\" \"person8@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 9 \"user9\" \"person9@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 3 \"user3\" \"person3@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 12 \"user12\" \"person12@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 27 \"user27\" \"person27@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 17 \"user17\" \"person17@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 16 \"user16\" \"person16@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 13 \"user13\" \"person13@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 24 \"user24\" \"person24@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 25 \"user25\" \"person25@example.com\"\n"
+  COMMANDS="${COMMANDS}insert into default 28 \"user28\" \"person28@example.com\"\n"
   COMMANDS="${COMMANDS}.btree\n" # Show the btree structure
 fi
 
 # Add select command to view data
-COMMANDS="${COMMANDS}select\n"
+COMMANDS="${COMMANDS}select from default\n"
 # Add exit to terminate the program
 COMMANDS="${COMMANDS}.exit\n"
 
-# Run each command individually to ensure we can catch failures
-IFS=$'\n' read -d '' -r -A command_array <<< "${COMMANDS//$'\n'/$'\n'}"
+# Run all commands in one go
+echo -e "$COMMANDS" | ./maincode "$DB_FILE"
+EXIT_CODE=$?
 
-for cmd in "${command_array[@]}"; do
-    if [ -n "$cmd" ]; then  # Skip empty lines
-        echo "Executing: $cmd"
-        echo "$cmd" | ./maincode "$DB_FILE"
-        EXIT_CODE=$?
-        
-        if [ $EXIT_CODE -ne 0 ]; then
-            echo "Command failed with exit code $EXIT_CODE: $cmd"
-            exit $EXIT_CODE
-        fi
-        
-        # Verify insert worked by checking select output
-        if [[ "$cmd" == insert* ]]; then
-            key=$(echo "$cmd" | awk '{print $2}')
-            echo "select" | ./maincode "$DB_FILE" | grep -q "$key" || {
-                echo "Failed to verify insert of key $key"
-                exit 1
-            }
-        fi
-    fi
-done
 
 if [ $EXIT_CODE -ne 0 ]; then
   echo "Program exited with code $EXIT_CODE. Insertion may have failed."

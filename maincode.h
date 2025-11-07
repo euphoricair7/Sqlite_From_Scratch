@@ -25,7 +25,9 @@ typedef enum  {
   EXECUTE_TABLE_FULL,
   EXECUTE_DUPLICATE_KEY,
   EXECUTE_KEY_NOT_FOUND,
-  EXECUTE_FAILURE
+  EXECUTE_FAILURE,
+  EXECUTE_CONSTRAINT_PRIMARY_KEY,
+  EXECUTE_CONSTRAINT_UNIQUE
 } ExecuteResult;
 
 typedef enum {
@@ -161,5 +163,7 @@ ExecuteResult execute_desc(Statement* statement, Table* table);
 void init_constraints(ConstraintList* list);
 void add_primary_key_constraint(ConstraintList* list, const char* column_name);
 void add_unique_constraint(ConstraintList* list, const char* column_name);
+ExecuteResult check_unique_email(Table* table, const char* email);
+
 
 #endif
