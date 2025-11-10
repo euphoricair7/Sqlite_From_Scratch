@@ -9,6 +9,7 @@ insert into <table_name> <id> "<username>" "<email>"
 select * from <table_name>
 update <table_name> set <field>=<value> where id=<id>
 use <database_filename>
+show tables
 
 # Example Usage
 

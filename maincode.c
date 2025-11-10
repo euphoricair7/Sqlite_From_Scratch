@@ -235,7 +235,20 @@ uint32_t* internal_node_child(void* node, uint32_t child_num){
   }else if(child_num == num_keys){
     uint32_t* right_child = internal_node_right_child(node);
     if(*right_child == INVALID_PAGE_NUM){
+      /* Debug info to help track down why right child is invalid */
+      uint32_t parent = *node_parent(node);
       printf("Tried to access right child of internal node with no right child\n");
+      printf("DEBUG internal_node_child: child_num=%d, num_keys=%d, right_child=%u, node_parent=%u\n",
+             child_num, num_keys, *right_child, parent);
+      /* Print keys in this internal node for context */
+      uint32_t num = num_keys;
+      printf("DEBUG internal_node_child: internal node has %u keys:\n", num);
+      for (uint32_t i = 0; i < num; i++) {
+        uint32_t key = *internal_node_key(node, i);
+        uint32_t child_page = *internal_node_child(node, i);
+        printf("  key[%u]=%u child_page=%u\n", i, key, child_page);
+      }
+      printf("  right_child pointer value=%u\n", *right_child);
       exit(EXIT_FAILURE);
     }
     return right_child;
