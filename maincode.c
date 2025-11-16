@@ -125,6 +125,9 @@ void internal_node_split_and_insert(Table* table, uint32_t parent_page_num, uint
 
   uint32_t new_page_num = get_unused_page_num(table->pager);
 
+  // Debugging info to trace split behavior
+  // Note: printing page numbers helps identify which node lost its right child
+
 
   /*
 +  Declaring a flag before updating pointers which
@@ -142,6 +145,9 @@ void internal_node_split_and_insert(Table* table, uint32_t parent_page_num, uint
 
 
   uint32_t splitting_root = is_node_root(old_node);
+
+  printf("DEBUG: internal_node_split_and_insert(parent=%u, child=%u, new=%u, splitting_root=%u)\n",
+    parent_page_num, child_page_num, new_page_num, splitting_root);
 
   void* parent;
   void* new_node;
@@ -233,29 +239,18 @@ uint32_t* internal_node_child(void* node, uint32_t child_num){
     printf("Tried to access child_num %d > num_keys %d\n", child_num, num_keys);
     exit(EXIT_FAILURE);
   }else if(child_num == num_keys){
-    uint32_t* right_child = internal_node_right_child(node);
-    if(*right_child == INVALID_PAGE_NUM){
-      /* Debug info to help track down why right child is invalid */
-      uint32_t parent = *node_parent(node);
-      printf("Tried to access right child of internal node with no right child\n");
-      printf("DEBUG internal_node_child: child_num=%d, num_keys=%d, right_child=%u, node_parent=%u\n",
-             child_num, num_keys, *right_child, parent);
-      /* Print keys in this internal node for context */
-      uint32_t num = num_keys;
-      printf("DEBUG internal_node_child: internal node has %u keys:\n", num);
-      for (uint32_t i = 0; i < num; i++) {
-        uint32_t key = *internal_node_key(node, i);
-        uint32_t child_page = *internal_node_child(node, i);
-        printf("  key[%u]=%u child_page=%u\n", i, key, child_page);
-      }
-      printf("  right_child pointer value=%u\n", *right_child);
-      exit(EXIT_FAILURE);
-    }
-    return right_child;
+    /* Return pointer to right child slot.  Don't treat a currently INVALID
+       right child as an immediate fatal error here because callers may be
+       writing the right child (e.g., when creating a new root).  The
+       caller should validate the value if necessary. */
+    return internal_node_right_child(node);
   }else{
     uint32_t* child =internal_node_cell(node, child_num);
     if(*child == INVALID_PAGE_NUM){
+      uintptr_t node_addr = (uintptr_t)node;
       printf("Tried to access child_num %d of internal node with no child\n", child_num);
+      printf("  node_addr=%#tx num_keys=%u child_num=%u child_val=%u\n", node_addr, num_keys, child_num, *child);
+      fflush(stdout);
       exit(EXIT_FAILURE);
     }
     return child;
@@ -325,6 +320,13 @@ void create_new_root(Table* table, uint32_t right_child_page_num){
   uint32_t left_child_page_num = get_unused_page_num(table->pager);
   void* left_child = get_page(table->pager, left_child_page_num);
 
+  printf("DEBUG: create_new_root(root_page=%u, right_child_page=%u, left_child_page=%u)\n",
+    table->root_page_num, right_child_page_num, left_child_page_num);
+  printf("  root_type=%d left_type=%d right_type=%d\n",
+    get_node_type(get_page(table->pager, table->root_page_num)),
+    get_node_type(left_child),
+    get_node_type(right_child));
+
   if(get_node_type(root)== NODE_INTERNAL){
     initialize_internal_node(left_child);
     initialize_internal_node(right_child);
@@ -354,9 +356,12 @@ void create_new_root(Table* table, uint32_t right_child_page_num){
   *internal_node_child(root, 1) = right_child_page_num;
   *node_parent(left_child) = table->root_page_num;
   *node_parent(right_child) = table->root_page_num;
-
   set_node_root(left_child, false);
-  set_node_root(right_child,true);
+  /*
+    The right child is not the root; the new root is `root`.
+    Mark both children as non-root.
+  */
+  set_node_root(right_child, false);
 }
 
 void update_internal_node_key(void* node, uint32_t old_key, uint32_t new_key) {
@@ -548,6 +553,8 @@ void internal_node_insert(Table* table, uint32_t parent_page_num, uint32_t child
   uint32_t index = internal_node_find_child(parent, child_max_key);
 
   uint32_t original_num_keys = *internal_node_num_keys(parent);
+  printf("DEBUG: internal_node_insert(parent_page=%u, child_page=%u) original_num_keys=%u right_child=%u\n",
+    parent_page_num, child_page_num, original_num_keys, *internal_node_right_child(parent));
   
 
   if (original_num_keys >= INTERNAL_NODE_MAX_CELLS) {
@@ -1218,6 +1225,10 @@ ExecuteResult execute_insert(Statement* statement, Table* table) {
     
     Row* row_to_insert = &(statement->row_to_insert);
     uint32_t key_to_insert = row_to_insert->id;
+
+  // Debug: print tree state before each insert
+  printf("DEBUG: execute_insert id=%u root_page=%u\n", key_to_insert, table->root_page_num);
+  print_tree(table->pager, table->root_page_num, 0);
 
     // Check primary key (ID) constraint
     Cursor* cursor = table_find(table, key_to_insert);
